@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isLocale, locales } from "@/i18n/config";
+import { SiteHeader } from "@/components/site-header";
+import { SiteFooter } from "@/components/site-footer";
 import "../globals.css";
 
 type Props = {
@@ -17,11 +19,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!isLocale(locale)) notFound();
 
   return {
-    title: locale === "en" ? "B2B Beauty" : "B2B 美妆",
+    title: locale === "en"
+      ? "Private Label Press-on Nails & False Eyelashes | Brand"
+      : "自有品牌穿戴甲与假睫毛批发 | Brand",
     description:
       locale === "en"
-        ? "Wholesale beauty project foundation."
-        : "美妆批发网站项目基础。",
+        ? "Wholesale, private label and custom press-on nail and false eyelash solutions for beauty brands, distributors and professionals."
+        : "面向美妆品牌、经销商与专业人士的穿戴甲和假睫毛批发、自有品牌及定制合作方案。",
+    alternates: { languages: { en: "/en", zh: "/zh" } },
   };
 }
 
@@ -31,7 +36,11 @@ export default async function LocaleLayout({ children, params }: Props) {
 
   return (
     <html lang={locale}>
-      <body>{children}</body>
+      <body>
+        <SiteHeader locale={locale} />
+        {children}
+        <SiteFooter locale={locale} />
+      </body>
     </html>
   );
 }

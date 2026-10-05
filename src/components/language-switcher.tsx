@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { Locale } from "@/i18n/config";
+import { localizedPath, pathWithoutLocale } from "@/lib/site/paths";
 
 export function LanguageSwitcher({ locale, label }: { locale: Locale; label: string }) {
   const pathname = usePathname();
-  const remainder = pathname.replace(/^\/(en|zh)(?=\/|$)/, "");
+  const path = pathWithoutLocale(pathname);
 
   return (
     <nav className="language-switcher" aria-label={label}>
-      <Link href={`/en${remainder}`} lang="en" aria-current={locale === "en" ? "page" : undefined}>EN</Link>
+      <Link href={localizedPath("en", path)} lang="en" aria-current={locale === "en" ? "page" : undefined}>EN</Link>
       <span aria-hidden="true">/</span>
-      <Link href={`/zh${remainder}`} lang="zh" aria-current={locale === "zh" ? "page" : undefined}>中文</Link>
+      <Link href={localizedPath("zh", path)} lang="zh" aria-current={locale === "zh" ? "page" : undefined}>中文</Link>
     </nav>
   );
 }

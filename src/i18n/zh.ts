@@ -2,73 +2,33 @@ import type en from "./en";
 
 const zh: typeof en = {
   brand: "BRAND.",
-  nav: {
-    products: "产品", wholesale: "批发合作", privateLabel: "自有品牌",
-    about: "关于我们", contact: "联系", quote: "获取报价", menu: "打开菜单", primary: "主导航", language: "语言",
+  nav: { products: "产品", allProducts: "全部产品", newArrivals: "新品", collections: "主题系列", privateLabel: "自有品牌", solutions: "合作方案", about: "关于", insights: "行业洞察", contact: "联系", quote: "获取报价", menu: "打开菜单", primary: "主导航", language: "语言" },
+  common: { explore: "探索", viewAll: "查看全部", learnMore: "了解更多", concept: "概念示意", comingSoon: "内容筹备中", backHome: "返回首页", requestQuote: "获取报价", noProducts: "经核实的产品目录就绪后，将在这里补充产品详情。", collectionKinds: { style: "风格", occasion: "场景", market: "市场", audience: "受众" } },
+  home: {
+    hero: { eyebrow: "专业美甲产品  /  自有品牌", first: "专业美甲产品", second: "为你的品牌而打造。", body: "探索穿戴甲、凝胶甲油、美甲灯和美甲工具，以及自有品牌、OEM 与 ODM 合作方向。", primary: "探索产品", secondary: "启动自有品牌项目", visual: "美甲产品  /  品牌可能" },
+    categories: { eyebrow: "01 / 产品分类", title: "完整的美甲产品视角。", body: "六大产品线，为你的下一季产品组合建立清晰基础。" },
+    newArrivals: { eyebrow: "02 / 新品", title: "新的产品方向", body: "率先了解正在构思的产品概念。" },
+    collections: { eyebrow: "03 / 主题系列", title: "找到适合的风格方向。", body: "主题系列按风格、场景和受众组织产品，独立于产品分类。" },
+    privateLabel: { eyebrow: "04 / 自有品牌", title: "让产品呈现你的品牌个性。", body: "围绕品牌愿景规划产品、色彩、包装与品牌细节。", items: ["产品定制", "色彩定制", "包装定制", "标识与品牌", "OEM / ODM"], action: "启动自有品牌项目" },
+    solutions: { eyebrow: "05 / B2B 合作方案", title: "围绕你的业务而设计。", body: "从不同美甲业务的需求出发，建立清晰的合作起点。", audiences: [{ title: "品牌", body: "建立鲜明的产品语言。" }, { title: "经销商", body: "为目标市场规划完整产品组合。" }, { title: "批发商", body: "探索灵活的产品线机会。" }, { title: "零售商", body: "打造符合目标顾客需求的美甲精选系列。" }] },
+    featured: { eyebrow: "06 / 精选产品", title: "聚焦产品细节", body: "以下为示意产品概念，真实规格与供应信息将于核实后补充。" },
+    why: { eyebrow: "07 / 合作方式", title: "为什么选择我们", body: "以审慎的方法规划 B2B 项目的每一步。", items: [{ title: "起订量规划", body: "根据项目沟通合适的起订数量。" }, { title: "灵活定制", body: "共同探索产品与品牌方向。" }, { title: "质量把控", body: "在约定流程中设置审核节点。" }, { title: "样品确认", body: "在生产决策前确认细节。" }, { title: "全球供应规划", body: "协调目标市场的交付要求。" }] },
+    quality: { eyebrow: "08 / 品质与制造", title: "重视每一个阶段的细节。", body: "材料、生产、检验与包装，都需要清晰的需求和审慎的审核。", items: ["材料", "生产", "检验", "包装"] },
+    insights: { eyebrow: "09 / 行业洞察", title: "为下一步决策提供思路。", body: "围绕美甲产品线规划的实用编辑主题。" },
+    cta: { eyebrow: "从这里开始", title: "准备打造你的美甲产品线？", body: "从产品方向和业务中的关键问题开始交流。", action: "获取报价" },
   },
-  hero: {
-    eyebrow: "批发合作  /  自有品牌  /  OEM · ODM",
-    first: "高品质美妆产品", second: "为你的品牌而生。",
-    body: "面向品牌、经销商和美妆专业人士，提供批发、自有品牌与定制美妆合作方案。",
-    explore: "探索产品", quote: "获取报价", visualCaption: "关于美妆的更多可能",
+  pages: {
+    products: { eyebrow: "产品", title: "专业美甲产品", body: "探索六大产品线及其细分分类。" },
+    newArrivals: { eyebrow: "新品", title: "新的产品方向", body: "面向未来目录开发的示意概念。" },
+    collections: { eyebrow: "主题系列", title: "按需求探索", body: "通过风格、场景和受众，从另一视角探索产品。" },
+    privateLabel: { eyebrow: "自有品牌", title: "从产品到包装，呈现你的愿景。", body: "围绕产品、色彩、包装与品牌需求，梳理清晰的项目简报。" },
+    solutions: { eyebrow: "合作方案", title: "面向美甲业务的合作方向", body: "探索适合品牌、经销商、批发商和零售商的项目规划。" },
+    about: { eyebrow: "关于", title: "用心规划美甲产品项目。", body: "经核实的企业与能力信息将在这里补充。" },
+    insights: { eyebrow: "行业洞察", title: "美甲业务洞察", body: "编辑指南主题正在筹备中。" },
+    contact: { eyebrow: "联系", title: "开始交流。", body: "经核实的联系方式将在网站上线前补充。" },
+    rfq: { eyebrow: "获取报价", title: "告诉我们你的项目需求。", body: "询盘表单将在后续 Sprint 开发，本页面目前不会提交请求。" },
   },
-  categories: {
-    eyebrow: "01  /  产品系列", title: "以审美，定义美妆。",
-    body: "聚焦两大品类，为你的下一季产品系列提供灵活起点。",
-    explore: "探索系列",
-    items: [
-      { name: "穿戴甲", body: "沙龙风格穿戴甲系列，适合批发、自有品牌及定制合作。", label: "穿戴甲系列  /  01", path: "products/press-on-nails" },
-      { name: "假睫毛", body: "面向美妆品牌、零售商和经销商的专业假睫毛系列。", label: "假睫毛系列  /  02", path: "products/false-eyelashes" },
-    ],
-  },
-  value: {
-    eyebrow: "02  /  合作价值", title: "为什么选择与我们合作",
-    body: "关注塑造美妆产品系列的每一个关键细节。",
-    items: [
-      { title: "低起订量", body: "根据项目需求沟通合适的订单规模。" },
-      { title: "自有品牌", body: "让产品系列呈现鲜明的品牌个性。" },
-      { title: "定制包装", body: "围绕品牌打造开箱体验。" },
-      { title: "质量把控", body: "在生产流程中规划产品检验。" },
-      { title: "全球运输", body: "根据目标市场协调交付。" },
-      { title: "OEM / ODM 支持", body: "探索产品开发与定制的可能性。" },
-    ],
-  },
-  privateLabel: {
-    eyebrow: "03  /  自有品牌", title: "打造你的美妆品牌",
-    body: "从产品方向到细节呈现，打造具有清晰品牌表达的系列。",
-    items: ["产品定制", "标识与品牌设计", "包装", "自有品牌", "OEM / ODM"],
-    action: "启动你的项目", visualLabel: "为你的创想而打造",
-  },
-  process: {
-    eyebrow: "04  /  合作流程", title: "合作如何进行",
-    steps: [
-      { title: "选择产品", body: "确定品类与系列方向。" },
-      { title: "沟通定制", body: "明确产品、品牌和包装需求。" },
-      { title: "确认样品", body: "确认细节后再进入下一步。" },
-      { title: "安排生产", body: "确认方案后推进生产。" },
-      { title: "协调交付", body: "安排产品运往目标地点。" },
-    ],
-  },
-  cta: {
-    eyebrow: "从这里开始", title: "准备打造下一个美妆系列？",
-    body: "告诉我们你的想法，从更多可能开始交流。",
-    quote: "获取报价", contact: "联系我们",
-  },
-  footer: {
-    tagline: "为引领未来的品牌提供用心打造的美妆产品。",
-    products: "产品", business: "合作", company: "公司", language: "语言",
-    nails: "穿戴甲", lashes: "假睫毛", wholesale: "批发合作",
-    privateLabel: "自有品牌", oem: "OEM / ODM", about: "关于我们", contact: "联系",
-    pending: "信息即将公布", rights: "保留所有权利。",
-  },
-  placeholder: {
-    eyebrow: "即将推出", body: "此页面正在准备中，更多信息即将上线。", back: "返回首页",
-    titles: {
-      products: "产品", "products/press-on-nails": "穿戴甲", "products/false-eyelashes": "假睫毛",
-      wholesale: "批发合作", "private-label": "自有品牌", "oem-odm": "OEM / ODM",
-      about: "关于我们", contact: "联系", rfq: "获取报价",
-    },
-  },
+  footer: { tagline: "面向成长型品牌的专业美甲产品与自有品牌方向。", explore: "探索", business: "合作", company: "公司", language: "语言", pending: "经核实的信息即将公布", rights: "保留所有权利。" },
 };
 
 export default zh;

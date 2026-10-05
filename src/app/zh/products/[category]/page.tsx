@@ -1,0 +1,20 @@
+import type { Metadata } from "next";
+import { categories, getCategorySlugPath } from "@/lib/catalog/taxonomy";
+import { CategoryPage } from "@/features/pages/catalog-pages";
+import { categoryMetadata, requireCategory } from "@/features/pages/route-data";
+
+type Props = { params: Promise<{ category: string }> };
+export function generateStaticParams() {
+  return categories.filter((item) => item.depth === 1).map((item) => {
+    const path = getCategorySlugPath(item);
+    return { category: path[0] };
+  });
+}
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const p = await params;
+  return categoryMetadata("zh", [p.category]);
+}
+export default async function Page({ params }: Props) {
+  const p = await params;
+  return <CategoryPage locale="zh" category={requireCategory([p.category])} />;
+}

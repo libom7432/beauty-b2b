@@ -4,6 +4,8 @@ import zh from "./zh";
 
 const dictionaries = { en, zh };
 
-export function getDictionary(locale: Locale) {
+export type Dictionary = typeof en;
+
+export function getDictionary(locale: Locale): Dictionary {
   return dictionaries[locale];
 }

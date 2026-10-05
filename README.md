@@ -1,44 +1,45 @@
-# B2B Beauty Site
+# Beauty B2B nail platform
 
-Sprint 0 foundation for a bilingual B2B beauty website serving Western markets, with the US as the first priority. English is the default language. Press-on nails and false eyelashes are the first planned product categories.
+V3 foundation for a bilingual professional nail products and private label website. English is served at `/`; Chinese is served at `/zh`. Earlier `/en` URLs redirect to their English equivalents.
 
-## Stack
+## Run locally
 
-- Next.js App Router, TypeScript, Tailwind CSS, ESLint
-- npm and Git
-- No database, authentication, commerce platform, or third-party i18n package yet
-
-## Getting started
-
-Requires Node.js 20.9 or newer and npm.
+Node.js 20.9+ and npm are required.
 
 ```bash
 npm install
 npm run dev
+npm run lint
+npm run typecheck
+npm run build
 ```
 
-Open `http://localhost:3000` to be redirected to `/en`. `/zh` serves Chinese. Run `npm run build`, `npm run lint`, and `npm run typecheck` for verification.
+The dev script uses filesystem polling for this macOS environment. The build script uses webpack because Turbopack's CSS worker could not bind its local port in the current sandbox.
 
-The dev script enables filesystem polling because native file watching hit the open-file limit in the current macOS development environment.
+## Architecture
 
-## Directory map
-
-| Path | Purpose |
+| Path | Role |
 | --- | --- |
-| `src/app/[locale]` | Localized App Router pages and layout; `/en` and `/zh` |
-| `src/app/api` | Reserved for future API routes; no endpoint exists |
-| `src/i18n` | Supported locales and small typed dictionaries |
-| `src/features/products` | Reserved for product features |
-| `src/features/categories` | Reserved for category features |
-| `src/features/wholesale` | Reserved for wholesale features |
-| `src/features/private-label` | Reserved for private label features |
-| `src/features/rfq` | Reserved for request for quotation features |
-| `src/features/sample-request` | Reserved for sample request features |
-| `src/features/admin` | Reserved for future admin features; none implemented |
-| `src/lib/database` | Reserved for future database integration; none configured |
+| `src/app/(en)` | Explicit English App Router paths at `/` |
+| `src/app/zh` | Mirrored Chinese paths at `/zh` |
+| `src/features/pages` | Shared route templates and route data validation |
+| `src/components/home` | Homepage sections assembled in the required V3 order |
+| `src/components/cards` | Reusable category, product, collection and article cards |
+| `src/lib/catalog/types.ts` | Category, product, variant, collection, attribute and RFQ types |
+| `src/lib/catalog/taxonomy.ts` | Central category tree and category-specific attribute definitions |
+| `src/lib/catalog/products.ts` | Small, explicitly marked demo product set |
+| `src/lib/catalog/collections.ts` | Customer-intent collections, independent of categories |
+| `src/lib/catalog/insights.ts` | Editorial topic previews, not published articles |
+| `src/i18n` | English and Chinese UI dictionaries |
+| `src/lib/site` | Locale paths, optional site URL and SEO metadata policy |
+| `src/styles` | Design tokens and component, home and route styles |
 
-The reserved directories contain only `.gitkeep` files. Add code when a feature enters scope.
+Taxonomy uses `parentId` and `depth` to support three levels. Add a category to the central list, then use its parent ID; route and navigation links derive from that tree. Products share one model and use a flexible `attributes` record with category-specific definitions. Collections have their own `kind` and product references, so a style or audience can span categories.
 
-## Environment
+The three product records, collections and article topics are **concept data only**. They do not assert stock, MOQ, lead times, certifications or manufacturing claims. Replace them with verified data before launch. RFQ is a route skeleton; it does not submit inquiries.
 
-Sprint 0 requires no environment variables. `.env.example` documents that state and provides a place to add future variables.
+## SEO and deployment domain
+
+Set `NEXT_PUBLIC_SITE_URL` in the deployment environment only when a real public domain is confirmed. Until then, pages are `noindex`, `robots.txt` disallows crawling and `sitemap.xml` is empty. With a real URL, the metadata helper emits absolute canonical and English/Chinese hreflang URLs plus base Open Graph fields. Only substantive pages are opted into indexing; concept product, collection, article and thin skeleton pages remain `noindex` until their content is verified. Update sitemap eligibility alongside those flags when pages become ready.
+
+No database, CMS, authentication, payment, cart, admin interface or live RFQ backend is included in V3.

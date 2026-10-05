@@ -1,73 +1,32 @@
 const en = {
   brand: "BRAND.",
-  nav: {
-    products: "Products", wholesale: "Wholesale", privateLabel: "Private Label",
-    about: "About", contact: "Contact", quote: "Get a Quote", menu: "Open menu", primary: "Primary navigation", language: "Language",
+  nav: { products: "Products", allProducts: "All Products", newArrivals: "New Arrivals", collections: "Collections", privateLabel: "Private Label", solutions: "Solutions", about: "About", insights: "Insights", contact: "Contact", quote: "Get a Quote", menu: "Open menu", primary: "Primary navigation", language: "Language" },
+  common: { explore: "Explore", viewAll: "View All", learnMore: "Learn More", concept: "Concept preview", comingSoon: "Content in preparation", backHome: "Back to Home", requestQuote: "Request a Quote", noProducts: "Product details will be added as the verified catalog becomes available.", collectionKinds: { style: "Style", occasion: "Occasion", market: "Market", audience: "Audience" } },
+  home: {
+    hero: { eyebrow: "PROFESSIONAL NAIL PRODUCTS  /  PRIVATE LABEL", first: "Professional Nail Products", second: "Built for Your Brand.", body: "Explore press-on nails, gel polish, nail lamps and nail tools alongside private label, OEM and ODM possibilities.", primary: "Explore Products", secondary: "Start Private Label", visual: "NAIL PRODUCTS  /  BRAND POSSIBILITIES" },
+    categories: { eyebrow: "01 / PRODUCT CATEGORIES", title: "A complete nail point of view.", body: "Six product lines. One considered foundation for your next assortment." },
+    newArrivals: { eyebrow: "02 / NEW ARRIVALS", title: "New directions", body: "A first look at product concepts being explored for the catalog." },
+    collections: { eyebrow: "03 / STYLE COLLECTIONS", title: "Find the direction that fits.", body: "Collections bring together products by style, occasion and audience—separate from what the product is." },
+    privateLabel: { eyebrow: "04 / PRIVATE LABEL", title: "Make it unmistakably yours.", body: "Shape the product, color, packaging and brand details around your vision.", items: ["Custom product", "Custom color", "Custom packaging", "Logo & branding", "OEM / ODM"], action: "Start Your Private Label" },
+    solutions: { eyebrow: "05 / B2B SOLUTIONS", title: "Built around your business.", body: "A focused starting point for the needs of different nail businesses.", audiences: [{ title: "Brands", body: "Build a recognizable product language." }, { title: "Distributors", body: "Plan a cohesive assortment for your market." }, { title: "Wholesalers", body: "Explore flexible product line opportunities." }, { title: "Retailers", body: "Create a nail edit with a clear customer point of view." }] },
+    featured: { eyebrow: "06 / FEATURED PRODUCTS", title: "A closer look", body: "Illustrative product concepts; verified specifications and availability will follow." },
+    why: { eyebrow: "07 / PARTNERSHIP", title: "Why choose us", body: "The working principles behind a thoughtful B2B program.", items: [{ title: "MOQ planning", body: "Discuss a suitable starting quantity for each program." }, { title: "Flexible customization", body: "Explore product and brand directions together." }, { title: "Quality control", body: "Build review points into the agreed process." }, { title: "Sampling", body: "Confirm details before a production decision." }, { title: "Global supply planning", body: "Coordinate requirements for the destination market." }] },
+    quality: { eyebrow: "08 / QUALITY & MANUFACTURING", title: "Details matter at every stage.", body: "Materials, production, inspection and packaging each deserve a clear brief and a considered review.", items: ["Materials", "Production", "Inspection", "Packaging"] },
+    insights: { eyebrow: "09 / INSIGHTS", title: "Ideas for the next decision.", body: "Practical editorial topics for planning a nail product line." },
+    cta: { eyebrow: "LET'S BUILD WHAT'S NEXT", title: "Ready to Build Your Nail Product Line?", body: "Start with your product direction and the questions that matter to your business.", action: "Request a Quote" },
   },
-  hero: {
-    eyebrow: "WHOLESALE  /  PRIVATE LABEL  /  OEM · ODM",
-    first: "Premium Beauty Products", second: "Built for Your Brand.",
-    body: "Wholesale, private label and custom beauty solutions for brands, distributors and beauty professionals.",
-    explore: "Explore Products", quote: "Request a Quote",
-    visualCaption: "AN EDITORIAL VIEW OF WHAT'S POSSIBLE",
+  pages: {
+    products: { eyebrow: "PRODUCTS", title: "Professional Nail Products", body: "Explore six product lines and the categories within them." },
+    newArrivals: { eyebrow: "NEW ARRIVALS", title: "New product directions", body: "Illustrative concepts for future catalog development." },
+    collections: { eyebrow: "COLLECTIONS", title: "Explore by intention", body: "Styles, occasions and audiences offer another way into the range." },
+    privateLabel: { eyebrow: "PRIVATE LABEL", title: "Your vision, from product to packaging.", body: "Bring together product, color, packaging and branding choices in a focused project brief." },
+    solutions: { eyebrow: "SOLUTIONS", title: "Solutions for nail businesses", body: "Explore ways to plan a program for brands, distributors, wholesalers and retailers." },
+    about: { eyebrow: "ABOUT", title: "A platform for thoughtful nail programs.", body: "More information about the business and its capabilities will be added after verification." },
+    insights: { eyebrow: "INSIGHTS", title: "Nail business insights", body: "Editorial guide topics are in preparation." },
+    contact: { eyebrow: "CONTACT", title: "Start a conversation.", body: "Verified contact details will be added here before launch." },
+    rfq: { eyebrow: "REQUEST A QUOTE", title: "Tell us about your project.", body: "The inquiry form is planned for a later Sprint. No request is submitted from this page yet." },
   },
-  categories: {
-    eyebrow: "01  /  COLLECTIONS", title: "Beauty, with intention.",
-    body: "Two focused categories. A flexible starting point for your next collection.",
-    explore: "Explore Collection",
-    items: [
-      { name: "Press-on Nails", body: "Salon-inspired press-on nail collections for wholesale, private label and custom programs.", label: "NAIL COLLECTION  /  01", path: "products/press-on-nails" },
-      { name: "False Eyelashes", body: "Professional lash collections designed for beauty brands, retailers and distributors.", label: "LASH COLLECTION  /  02", path: "products/false-eyelashes" },
-    ],
-  },
-  value: {
-    eyebrow: "02  /  PARTNERSHIP", title: "Why partner with us",
-    body: "A considered approach to the details that shape your beauty collection.",
-    items: [
-      { title: "Low MOQ", body: "Discuss an order size that fits your program." },
-      { title: "Private Label", body: "Make the collection feel unmistakably yours." },
-      { title: "Custom Packaging", body: "Shape the unboxing experience around your brand." },
-      { title: "Quality Control", body: "Plan product review into the production process." },
-      { title: "Global Shipping", body: "Coordinate delivery for your target market." },
-      { title: "OEM / ODM Support", body: "Explore product development and customization." },
-    ],
-  },
-  privateLabel: {
-    eyebrow: "03  /  PRIVATE LABEL", title: "Build Your Beauty Brand",
-    body: "From product direction to the finishing details, create a collection with a clear point of view.",
-    items: ["Product customization", "Logo & branding", "Packaging", "Private label", "OEM / ODM"],
-    action: "Start Your Project", visualLabel: "MADE FOR YOUR VISION",
-  },
-  process: {
-    eyebrow: "04  /  THE PROCESS", title: "How it works",
-    steps: [
-      { title: "Choose Products", body: "Select the category and direction for your collection." },
-      { title: "Customize", body: "Define product, branding and packaging preferences." },
-      { title: "Confirm Samples", body: "Review the details before moving forward." },
-      { title: "Production", body: "Move into production after confirmation." },
-      { title: "Delivery", body: "Coordinate shipment to your destination." },
-    ],
-  },
-  cta: {
-    eyebrow: "LET'S BEGIN", title: "Ready to Build Your Next Beauty Collection?",
-    body: "Tell us what you have in mind. We can start with the possibilities.",
-    quote: "Request a Quote", contact: "Contact Us",
-  },
-  footer: {
-    tagline: "Thoughtful beauty products for the brands shaping what comes next.",
-    products: "Products", business: "Business", company: "Company", language: "Language",
-    nails: "Press-on Nails", lashes: "False Eyelashes", wholesale: "Wholesale",
-    privateLabel: "Private Label", oem: "OEM / ODM", about: "About", contact: "Contact",
-    pending: "Details coming soon", rights: "All rights reserved.",
-  },
-  placeholder: {
-    eyebrow: "COMING SOON", body: "We're preparing this section. More details will be available here soon.", back: "Back to Home",
-    titles: {
-      products: "Products", "products/press-on-nails": "Press-on Nails", "products/false-eyelashes": "False Eyelashes",
-      wholesale: "Wholesale", "private-label": "Private Label", "oem-odm": "OEM / ODM",
-      about: "About", contact: "Contact", rfq: "Request a Quote",
-    },
-  },
+  footer: { tagline: "Professional nail products and private label directions for growing brands.", explore: "Explore", business: "Business", company: "Company", language: "Language", pending: "Verified details coming soon", rights: "All rights reserved." },
 };
 
 export default en;

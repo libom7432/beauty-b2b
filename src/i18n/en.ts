@@ -1,6 +1,6 @@
 const en = {
   brand: "BRAND.",
-  nav: { products: "Products", allProducts: "All Products", newArrivals: "New Arrivals", collections: "Collections", privateLabel: "Private Label", solutions: "Solutions", about: "About", insights: "Insights", contact: "Contact", quote: "Get a Quote", menu: "Open menu", primary: "Primary navigation", language: "Language" },
+  nav: { products: "Products", productsMenuToggle: "Toggle product categories", allProducts: "All Products", newArrivals: "New Arrivals", collections: "Collections", privateLabel: "Private Label", solutions: "Solutions", about: "About", insights: "Insights", contact: "Contact", quote: "Get a Quote", menu: "Open menu", primary: "Primary navigation", language: "Language" },
   common: { explore: "Explore", viewAll: "View All", learnMore: "Learn More", concept: "Concept preview", comingSoon: "Content in preparation", backHome: "Back to Home", requestQuote: "Request a Quote", noProducts: "Product details will be added as the verified catalog becomes available.", collectionKinds: { style: "Style", occasion: "Occasion", market: "Market", audience: "Audience" } },
   home: {
     hero: { eyebrow: "PROFESSIONAL NAIL PRODUCTS  /  PRIVATE LABEL", first: "Professional Nail Products", second: "Built for Your Brand.", body: "Explore press-on nails, gel polish, nail lamps and nail tools alongside private label, OEM and ODM possibilities.", primary: "Explore Products", secondary: "Start Private Label", visual: "NAIL PRODUCTS  /  BRAND POSSIBILITIES" },

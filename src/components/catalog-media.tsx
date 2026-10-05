@@ -1,7 +1,7 @@
 import Image from "next/image";
 import type { ProductImage, VisualKind } from "@/lib/catalog/types";
 
-type Props = { visual: VisualKind; image?: ProductImage; alt?: string; className?: string };
+type Props = { visual: VisualKind; image?: Pick<ProductImage, "src"> & { position?: string }; alt?: string; className?: string; sizes?: string };
 
 function MockArtwork({ visual }: { visual: VisualKind }) {
   const colors: Record<VisualKind, string> = {
@@ -44,10 +44,10 @@ function MockArtwork({ visual }: { visual: VisualKind }) {
   );
 }
 
-export function CatalogMedia({ visual, image, alt = "", className = "" }: Props) {
+export function CatalogMedia({ visual, image, alt = "", className = "", sizes = "(max-width: 768px) 100vw, 50vw" }: Props) {
   return (
     <div className={`catalog-media ${className}`}>
-      {image?.src ? <Image src={image.src} alt={alt} fill sizes="(max-width: 768px) 100vw, 50vw" className="object-cover" /> : <MockArtwork visual={visual} />}
+      {image?.src ? <Image src={image.src} alt={alt} fill sizes={sizes} className="object-cover" style={{ objectPosition: image.position }} /> : <MockArtwork visual={visual} />}
     </div>
   );
 }

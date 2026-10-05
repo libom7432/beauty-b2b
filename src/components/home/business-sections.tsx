@@ -1,13 +1,15 @@
+import Image from "next/image";
 import type { Locale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
 import { localizedPath } from "@/lib/site/paths";
 import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
 import { SectionHeading } from "@/components/ui/section-heading";
+import { homeVisuals } from "@/lib/site/visual-assets";
 
 export function PrivateLabelSection({ locale }: { locale: Locale }) {
   const copy = getDictionary(locale).home.privateLabel;
-  return <section className="section-space" aria-labelledby="private-label-title"><Container className="editorial-split"><div className="private-label-art" aria-hidden="true"><div className="private-label-ring" /><span>B.</span><small>PRIVATE LABEL / NAIL STUDIO</small></div><div className="editorial-copy"><SectionHeading id="private-label-title" eyebrow={copy.eyebrow} title={copy.title} description={copy.body} /><ul className="editorial-list">{copy.items.map((item) => <li key={item}>{item}</li>)}</ul><Button href={localizedPath(locale, "/private-label")}>{copy.action}</Button></div></Container></section>;
+  return <section className="section-space" aria-labelledby="private-label-title"><Container className="editorial-split"><div className="private-label-art"><Image src={homeVisuals.privateLabel.src} alt={homeVisuals.privateLabel.alt[locale]} fill sizes="(max-width: 900px) 100vw, 50vw" className="private-label-image" style={{ objectPosition: homeVisuals.privateLabel.position }} /></div><div className="editorial-copy"><SectionHeading id="private-label-title" eyebrow={copy.eyebrow} title={copy.title} description={copy.body} /><ul className="editorial-list">{copy.items.map((item) => <li key={item}>{item}</li>)}</ul><Button href={localizedPath(locale, "/private-label")}>{copy.action}</Button></div></Container></section>;
 }
 
 export function SolutionsSection({ locale }: { locale: Locale }) {

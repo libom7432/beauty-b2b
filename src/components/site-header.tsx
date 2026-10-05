@@ -6,6 +6,7 @@ import { localizedPath } from "@/lib/site/paths";
 import { Button } from "./ui/button";
 import { Container } from "./ui/container";
 import { LanguageSwitcher } from "./language-switcher";
+import { ProductsMegaMenu } from "./products-mega-menu";
 
 export function SiteHeader({ locale }: { locale: Locale }) {
   const { brand, nav } = getDictionary(locale);
@@ -20,12 +21,10 @@ export function SiteHeader({ locale }: { locale: Locale }) {
     <Container className="header-inner">
       <Link className="brand-mark" href={localizedPath(locale)}>{brand}</Link>
       <nav className="desktop-navigation" aria-label={nav.primary}>
-        <details className="products-menu"><summary>{nav.products}<span aria-hidden="true">⌄</span></summary>
-          <div className="products-menu-panel">
-            <div className="products-menu-heading"><span className="eyebrow">{nav.products}</span><Link href={localizedPath(locale, "/products")}>{nav.allProducts} ↗</Link></div>
-            <div className="products-menu-grid">{topCategories.map((category) => <Link key={category.id} href={localizedPath(locale, `/products/${category.slug}`)}><strong>{category.name[locale]}</strong><small>{category.shortDescription[locale]}</small></Link>)}</div>
-          </div>
-        </details>
+        <ProductsMegaMenu href={localizedPath(locale, "/products")} label={nav.products} toggleLabel={nav.productsMenuToggle}>
+          <div className="products-menu-heading"><span className="eyebrow">{nav.products}</span><Link href={localizedPath(locale, "/products")}>{nav.allProducts} ↗</Link></div>
+          <div className="products-menu-grid">{topCategories.map((category) => <Link key={category.id} href={localizedPath(locale, `/products/${category.slug}`)}><strong>{category.name[locale]}</strong><small>{category.shortDescription[locale]}</small></Link>)}</div>
+        </ProductsMegaMenu>
         {links.map(([path, label]) => <Link key={path} href={localizedPath(locale, `/${path}`)}>{label}</Link>)}
       </nav>
       <div className="header-actions"><LanguageSwitcher locale={locale} label={nav.language} /><Button href={localizedPath(locale, "/rfq")} className="header-quote">{nav.quote}</Button>

@@ -14,7 +14,8 @@ export function requireCategory(slugs: string[]) {
 
 export function categoryMetadata(locale: Locale, slugs: string[]) {
   const category = requireCategory(slugs);
-  return pageMetadata({ locale, path: `/products/${getCategorySlugPath(category).join("/")}`, title: category.seo.title[locale], description: category.seo.description[locale], indexable: category.seo.indexable });
+  // Listing content is still mock data; every category depth remains noindex.
+  return pageMetadata({ locale, path: `/products/${getCategorySlugPath(category).join("/")}`, title: category.seo.title[locale], description: category.seo.description[locale], indexable: false });
 }
 
 export function legacyToolsCareMetadata(locale: Locale) {

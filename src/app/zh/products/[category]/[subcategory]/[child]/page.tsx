@@ -3,7 +3,7 @@ import { categories, getCategorySlugPath } from "@/lib/catalog/taxonomy";
 import { CategoryPage } from "@/features/pages/catalog-pages";
 import { categoryMetadata, requireCategory } from "@/features/pages/route-data";
 
-type Props = { params: Promise<{ category: string; subcategory: string; child: string }> };
+type Props = { params: Promise<{ category: string; subcategory: string; child: string }>; searchParams: Promise<{ page?: string | string[] }> };
 export function generateStaticParams() {
   return categories.filter((item) => item.depth === 3).map((item) => {
     const path = getCategorySlugPath(item);
@@ -14,7 +14,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const p = await params;
   return categoryMetadata("zh", [p.category, p.subcategory, p.child]);
 }
-export default async function Page({ params }: Props) {
+export default async function Page({ params, searchParams }: Props) {
   const p = await params;
-  return <CategoryPage locale="zh" category={requireCategory([p.category, p.subcategory, p.child])} />;
+  return <CategoryPage locale="zh" category={requireCategory([p.category, p.subcategory, p.child])} pageQuery={(await searchParams).page} />;
 }

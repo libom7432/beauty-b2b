@@ -81,6 +81,32 @@
 .product-card-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 15px; color: #98766c; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
 .product-card-v3 h3 { margin: 12px 0 8px; font-family: var(--font-editorial); font-size: clamp(1.7rem, 2vw, 2.4rem); font-weight: 400; letter-spacing: -.035em; }
 .product-card-link > p { max-width: 360px; margin: 0; color: var(--color-muted); font-size: 13px; line-height: 1.6; }
+.product-card-terms { display: grid; gap: 8px; margin: 18px 0 0; padding-top: 16px; border-top: var(--hairline); }
+.product-card-terms > div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; line-height: 1.5; }
+.product-card-terms dt { color: var(--color-muted); }
+.product-card-terms dd { margin: 0; color: var(--color-ink); font-weight: 600; text-align: right; }
+.product-card-capabilities { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.product-card-capabilities span { padding: 5px 8px; border: var(--hairline); border-radius: 3px; color: #795f56; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.product-card-link > .product-card-disclaimer { margin-top: 13px; font-size: 11px; line-height: 1.5; }
+.product-card-view { display: inline-block; margin-top: 14px; color: #795f56; font-size: 12px; font-weight: 700; }
+.product-card-listing .product-card-link { display: flex; min-width: 0; flex-direction: column; }
+.product-card-listing h3 { display: -webkit-box; min-height: 2.32em; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.16; }
+.product-card-listing .product-card-link > p:not(.product-card-disclaimer) { display: -webkit-box; min-height: 3.2em; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.product-card-listing .product-card-terms { margin-top: auto; }
+.product-card-listing .product-card-terms > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); }
+.product-card-listing .product-card-terms dt, .product-card-listing .product-card-terms dd { min-width: 0; overflow-wrap: anywhere; }
+.product-card-listing .product-card-view { margin-top: auto; padding-top: 14px; transition: color .2s ease; }
+.product-card-listing .product-card-view span { display: inline-block; transition: transform .2s ease; }
+@media (hover: hover) and (pointer: fine) {
+  .product-card-listing .product-card-link:hover .product-card-view { color: #9a665b; }
+  .product-card-listing .product-card-link:hover .product-card-view span { transform: translateX(4px); }
+}
+.product-card-listing .product-card-link:focus-visible { outline: 3px solid #946c61; outline-offset: 6px; }
+.product-card-listing .product-card-link:focus-visible .product-card-view { color: #9a665b; }
+@media (prefers-reduced-motion: reduce) {
+  .product-card-listing .product-card-view, .product-card-listing .product-card-view span { transition: none; }
+  .product-card-listing .product-card-link:hover .product-card-view span { transform: none; }
+}
 .collection-grid-v3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 42px 26px; }
 .collection-card-v3 .card-media-link { aspect-ratio: 1.24 / 1; }
 .collection-card-copy { padding-top: 16px; }
@@ -150,6 +176,16 @@
 @media (max-width: 480px) {
   .site-container { padding-inline: 21px; }
   .category-grid-v3, .collection-grid-v3, .product-grid-v3, .article-grid-v3 { grid-template-columns: minmax(0, 1fr); }
+  .product-grid-v3.product-listing-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 10px; row-gap: 28px; }
+  .product-card-listing .product-card-meta, .product-card-listing .product-card-link > p:not(.product-card-disclaimer), .product-card-listing .product-card-view { display: none; }
+  .product-card-listing h3 { min-height: 2.48em; margin: 9px 0 0; font-size: 1.05rem; line-height: 1.24; }
+  .product-card-listing .product-card-terms { gap: 7px; margin-top: 11px; padding-top: 9px; }
+  .product-card-listing .product-card-terms > div { display: block; font-size: 11px; line-height: 1.4; }
+  .product-card-listing .product-card-terms dt { font-size: 10px; }
+  .product-card-listing .product-card-terms dd { margin-top: 2px; text-align: left; font-variant-numeric: tabular-nums; }
+  .product-card-listing .product-card-capabilities { gap: 4px; margin-top: 9px; }
+  .product-card-listing .product-card-capabilities span { padding: 3px 5px; font-size: 9px; }
+  .product-card-listing .product-card-link > .product-card-disclaimer { margin-top: 8px; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
   .new-arrivals-grid-two .card-media-link { aspect-ratio: 1.05 / 1; }
   .button-row { align-items: stretch; flex-direction: column; width: 100%; }
   .button-row .button { width: 100%; }

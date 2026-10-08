@@ -7,6 +7,10 @@
 .route-subsection { padding: 35px 0 var(--section-space); }
 .route-subsection h2 { margin: 0 0 28px; font-family: var(--font-editorial); font-size: 2.8rem; font-weight: 400; }
 .route-empty { margin: 22px 0 var(--section-space); padding-top: 22px; border-top: var(--hairline); color: var(--color-muted); font-size: 14px; line-height: 1.6; }
+.route-empty a { color: #795f56; text-decoration: underline; text-underline-offset: 3px; }
+.product-pagination { display: flex; align-items: center; justify-content: center; gap: clamp(14px, 4vw, 32px); margin-top: 45px; font-size: 13px; }
+.product-pagination a { color: #795f56; text-decoration: underline; text-underline-offset: 3px; }
+.product-pagination [aria-disabled="true"] { color: var(--color-muted); opacity: .6; }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .85fr); gap: clamp(45px, 7vw, 110px); align-items: center; padding-block: 90px var(--section-space); }
 .detail-grid > .catalog-media { min-height: 610px; }
 .detail-copy { max-width: 520px; }

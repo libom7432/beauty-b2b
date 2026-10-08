@@ -1,9 +1,10 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import type { Locale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
 import type { Category, Product, Collection } from "@/lib/catalog/types";
-import { getTopCategories, getCategoryChildren, getCategoryById } from "@/lib/catalog/taxonomy";
-import { getProductsForCategory, getNewArrivals, products } from "@/lib/catalog/products";
+import { getTopCategories, getCategoryChildren, getCategoryById, getCategorySlugPath } from "@/lib/catalog/taxonomy";
+import { getProductsForCategory, getNewArrivals, paginateProducts, products } from "@/lib/catalog/products";
 import { collections } from "@/lib/catalog/collections";
 import { localizedPath } from "@/lib/site/paths";
 import { CategoryCard } from "@/components/cards/category-card";
@@ -35,14 +36,26 @@ export function LegacyToolsCarePage({ locale }: { locale: Locale }) {
   </Container></main>;
 }
 
-export function CategoryPage({ locale, category }: { locale: Locale; category: Category }) {
+export function CategoryPage({ locale, category, pageQuery }: { locale: Locale; category: Category; pageQuery?: string | string[] }) {
   const copy = getDictionary(locale);
   const children = getCategoryChildren(category.id);
-  const categoryProducts = getProductsForCategory(category.id);
+  const categoryProducts = getProductsForCategory(category);
+  const pagination = paginateProducts(categoryProducts, pageQuery);
+  const basePath = localizedPath(locale, `/products/${getCategorySlugPath(category).join("/")}`);
+  if (pagination.canonicalRedirect) redirect(basePath);
+  const pagePath = (page: number) => page === 1 ? basePath : `${basePath}?page=${page}`;
   return <main><Container><div className="route-breadcrumb"><Link href={localizedPath(locale, "/products")}>{copy.nav.products}</Link><span aria-hidden="true">/</span><span>{category.name[locale]}</span></div><Intro eyebrow={copy.nav.products} title={category.name[locale]} body={category.shortDescription[locale]} />
     {children.length > 0 && <div className="category-grid-v3 route-grid">{children.map((child) => <CategoryCard key={child.id} category={child} locale={locale} />)}</div>}
-    {categoryProducts.length > 0 && <div className="route-subsection"><h2>{copy.home.featured.title}</h2><div className="product-grid-v3">{categoryProducts.map((product) => <ProductCard key={product.id} product={product} locale={locale} />)}</div></div>}
-    {children.length === 0 && categoryProducts.length === 0 && <p className="route-empty">{copy.common.noProducts}</p>}
+    <section className="route-subsection" aria-label={copy.listing.products}>
+      <h2>{pagination.totalProducts} {pagination.totalProducts === 1 ? copy.listing.product : copy.listing.products}</h2>
+      {pagination.totalProducts > 0 ? <div className="product-grid-v3 product-listing-grid">{pagination.items.map((product) => <ProductCard key={product.id} product={product} locale={locale} listing />)}</div>
+        : <p className="route-empty">{copy.listing.empty} <Link href={localizedPath(locale, "/products")}>{copy.listing.browseCategories}</Link></p>}
+      {pagination.totalPages > 1 && <nav className="product-pagination" aria-label={copy.listing.pagination}>
+        {pagination.page > 1 ? <Link href={pagePath(pagination.page - 1)} rel="prev">{copy.listing.previous}</Link> : <span aria-disabled="true">{copy.listing.previous}</span>}
+        <span>{copy.listing.pageStatus.replace("{page}", String(pagination.page)).replace("{total}", String(pagination.totalPages))}</span>
+        {pagination.page < pagination.totalPages ? <Link href={pagePath(pagination.page + 1)} rel="next">{copy.listing.next}</Link> : <span aria-disabled="true">{copy.listing.next}</span>}
+      </nav>}
+    </section>
   </Container></main>;
 }
 

@@ -43,6 +43,13 @@ export const categoryVisuals: Partial<Record<string, VisualAsset>> = {
       zh: "玫瑰色与裸色甲油瓶及打开的甲油刷",
     },
   },
+  "nail-gel-extension": {
+    src: "/images/private-label/private-label-v1.png",
+    alt: {
+      en: "Concept display of nail tips, gel pots and packaging",
+      zh: "展示甲片、凝胶罐与包装的概念陈列",
+    },
+  },
   "nail-lamps": {
     src: "/images/categories/nail-lamps-tools-v1.png",
     alt: {
@@ -65,11 +72,32 @@ export const categoryVisuals: Partial<Record<string, VisualAsset>> = {
       zh: "工作台上的美甲刷、锉条、死皮工具与护理瓶",
     },
   },
+  "nail-tools": {
+    src: "/images/categories/nail-tools-care-v1.png",
+    alt: {
+      en: "Manicure brushes, files and cuticle tools on a work table",
+      zh: "工作台上的美甲刷、锉条与死皮工具",
+    },
+  },
+  "nail-care": {
+    src: "/images/categories/nail-tools-care-v1.png",
+    alt: {
+      en: "Illustrative nail care bottles and preparation tools on a work table",
+      zh: "工作台上的示意护理瓶与前处理工具",
+    },
+  },
   "nail-accessories": {
     src: "/images/categories/nail-accessories-v1.png",
     alt: {
       en: "Nail art charms, rhinestones and decorative accents beside press-on nails",
       zh: "穿戴甲旁的美甲饰品、水钻与装饰配件",
+    },
+  },
+  "nail-art": {
+    src: "/images/categories/nail-accessories-v1.png",
+    alt: {
+      en: "Nail art charms, rhinestones and decorative accents",
+      zh: "美甲饰品、水钻与装饰配件",
     },
   },
 };

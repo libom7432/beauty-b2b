@@ -36,6 +36,8 @@ The dev script uses filesystem polling for this macOS environment. The build scr
 
 Taxonomy uses `parentId` and `depth` to support three levels. Add a category to the central list, then use its parent ID; route and navigation links derive from that tree. Products share one model and use a flexible `attributes` record with category-specific definitions. Collections have their own `kind` and product references, so a style or audience can span categories.
 
+The catalog has eight top-level categories. The Sprint 1 homepage keeps six fixed editorial category cards in `src/lib/site/home-category-entries.ts`, independently of the catalog count. The former `/products/nail-tools-care` route remains a non-indexable navigation page linking to Nail Tools and Nail Care. Moved category URLs redirect to their new paths in English and Chinese; category pages remain non-indexable until verified product content is available.
+
 The three product records, collections and article topics are **concept data only**. They do not assert stock, MOQ, lead times, certifications or manufacturing claims. Replace them with verified data before launch. RFQ is a route skeleton; it does not submit inquiries.
 
 ## SEO and deployment domain

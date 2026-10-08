@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Locale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
 import type { Category, Product, Collection } from "@/lib/catalog/types";
-import { getTopCategories, getCategoryChildren } from "@/lib/catalog/taxonomy";
+import { getTopCategories, getCategoryChildren, getCategoryById } from "@/lib/catalog/taxonomy";
 import { getProductsForCategory, getNewArrivals, products } from "@/lib/catalog/products";
 import { collections } from "@/lib/catalog/collections";
 import { localizedPath } from "@/lib/site/paths";
@@ -20,6 +20,19 @@ function Intro({ eyebrow, title, body }: { eyebrow: string; title: string; body:
 export function ProductsIndexPage({ locale }: { locale: Locale }) {
   const copy = getDictionary(locale).pages.products;
   return <main><Container><Intro eyebrow={copy.eyebrow} title={copy.title} body={copy.body} /><div className="category-grid-v3 route-grid">{getTopCategories().map((category) => <CategoryCard key={category.id} category={category} locale={locale} />)}</div></Container></main>;
+}
+
+// The former combined category remains a useful entry point to both new branches.
+export function LegacyToolsCarePage({ locale }: { locale: Locale }) {
+  const copy = getDictionary(locale);
+  const destinations = ["nail-tools", "nail-care"];
+  return <main><Container><div className="route-breadcrumb"><Link href={localizedPath(locale, "/products")}>{copy.nav.products}</Link><span aria-hidden="true">/</span><span>{locale === "zh" ? "美甲工具与护理" : "Nail Tools & Care"}</span></div>
+    <Intro eyebrow={copy.nav.products} title={locale === "zh" ? "美甲工具与护理" : "Nail Tools & Care"} body={locale === "zh" ? "根据产品用途，探索美甲工具与美甲护理两个独立分类。" : "Explore nail tools and nail care as two distinct product categories."} />
+    <div className="category-grid-v3 route-grid">{destinations.map((id) => {
+      const category = getCategoryById(id);
+      return category ? <CategoryCard key={id} category={category} locale={locale} /> : null;
+    })}</div>
+  </Container></main>;
 }
 
 export function CategoryPage({ locale, category }: { locale: Locale; category: Category }) {

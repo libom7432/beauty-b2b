@@ -5,7 +5,7 @@ const en = {
   common: { explore: "Explore", viewAll: "View All", learnMore: "Learn More", concept: "Concept preview", comingSoon: "Content in preparation", backHome: "Back to Home", requestQuote: "Request a Quote", noProducts: "Product details will be added as the verified catalog becomes available.", collectionKinds: { style: "Style", occasion: "Occasion", market: "Market", audience: "Audience" } },
   home: {
     hero: { eyebrow: "PROFESSIONAL NAIL PRODUCTS  /  PRIVATE LABEL", first: "Professional Nail Products", second: "Built for Your Brand.", body: "Explore press-on nails, gel polish, nail lamps and nail tools alongside private label, OEM and ODM possibilities.", primary: "Explore Products", secondary: "Start Private Label", visual: "NAIL PRODUCTS  /  BRAND POSSIBILITIES" },
-    categories: { eyebrow: "01 / PRODUCT CATEGORIES", title: "A complete nail point of view.", body: "Six product lines. One considered foundation for your next assortment." },
+    categories: { eyebrow: "01 / PRODUCT CATEGORIES", title: "A complete nail point of view.", body: "Six curated starting points for your next assortment. Explore all eight product categories in the catalog." },
     newArrivals: { eyebrow: "02 / NEW ARRIVALS", title: "New Arrivals", body: "Explore the latest products and product directions for your next assortment." },
     collections: { eyebrow: "03 / STYLE COLLECTIONS", title: "Shop by Style", body: "Explore curated nail collections shaped by style, finish and market direction." },
     privateLabel: { eyebrow: "04 / PRIVATE LABEL", title: "Make it unmistakably yours.", body: "Shape the product, color, packaging and brand details around your vision.", items: ["Custom product", "Custom color", "Custom packaging", "Logo & branding", "OEM / ODM"], action: "Start Your Private Label" },
@@ -18,7 +18,7 @@ const en = {
     cta: { eyebrow: "LET'S BUILD WHAT'S NEXT", title: "Ready to Build Your Nail Product Line?", body: "Start with your product direction and the questions that matter to your business.", action: "Request a Quote", whatsapp: "Chat on WhatsApp" },
   },
   pages: {
-    products: { eyebrow: "PRODUCTS", title: "Professional Nail Products", body: "Explore six product lines and the categories within them." },
+    products: { eyebrow: "PRODUCTS", title: "Professional Nail Products", body: "Explore eight product categories and the ranges within them." },
     newArrivals: { eyebrow: "NEW ARRIVALS", title: "New product directions", body: "Illustrative concepts for future catalog development." },
     collections: { eyebrow: "COLLECTIONS", title: "Explore by intention", body: "Styles, occasions and audiences offer another way into the range." },
     privateLabel: { eyebrow: "PRIVATE LABEL", title: "Your vision, from product to packaging.", body: "Bring together product, color, packaging and branding choices in a focused project brief." },

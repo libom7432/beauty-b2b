@@ -7,7 +7,7 @@ const zh: typeof en = {
   common: { explore: "探索", viewAll: "查看全部", learnMore: "了解更多", concept: "概念示意", comingSoon: "内容筹备中", backHome: "返回首页", requestQuote: "获取报价", noProducts: "经核实的产品目录就绪后，将在这里补充产品详情。", collectionKinds: { style: "风格", occasion: "场景", market: "市场", audience: "受众" } },
   home: {
     hero: { eyebrow: "专业美甲产品  /  自有品牌", first: "专业美甲产品", second: "为你的品牌而打造。", body: "探索穿戴甲、凝胶甲油、美甲灯和美甲工具，以及自有品牌、OEM 与 ODM 合作方向。", primary: "探索产品", secondary: "启动自有品牌项目", visual: "美甲产品  /  品牌可能" },
-    categories: { eyebrow: "01 / 产品分类", title: "完整的美甲产品视角。", body: "六大产品线，为你的下一季产品组合建立清晰基础。" },
+    categories: { eyebrow: "01 / 产品分类", title: "完整的美甲产品视角。", body: "从六个精选入口开始选品，在产品目录中探索全部八大分类。" },
     newArrivals: { eyebrow: "02 / 新品", title: "新品与趋势", body: "探索最新产品与系列方向，为下一季选品寻找灵感。" },
     collections: { eyebrow: "03 / 风格系列", title: "按风格探索", body: "从风格、质感与市场趋势出发，探索精选美甲系列。" },
     privateLabel: { eyebrow: "04 / 自有品牌", title: "让产品呈现你的品牌个性。", body: "围绕品牌愿景规划产品、色彩、包装与品牌细节。", items: ["产品定制", "色彩定制", "包装定制", "标识与品牌", "OEM / ODM"], action: "启动自有品牌项目" },
@@ -20,7 +20,7 @@ const zh: typeof en = {
     cta: { eyebrow: "从这里开始", title: "准备打造你的美甲产品线？", body: "从产品方向和业务中的关键问题开始交流。", action: "获取报价", whatsapp: "WhatsApp 咨询" },
   },
   pages: {
-    products: { eyebrow: "产品", title: "专业美甲产品", body: "探索六大产品线及其细分分类。" },
+    products: { eyebrow: "产品", title: "专业美甲产品", body: "探索八大产品分类及其细分品类。" },
     newArrivals: { eyebrow: "新品", title: "新的产品方向", body: "面向未来目录开发的示意概念。" },
     collections: { eyebrow: "主题系列", title: "按需求探索", body: "通过风格、场景和受众，从另一视角探索产品。" },
     privateLabel: { eyebrow: "自有品牌", title: "从产品到包装，呈现你的愿景。", body: "围绕产品、色彩、包装与品牌需求，梳理清晰的项目简报。" },

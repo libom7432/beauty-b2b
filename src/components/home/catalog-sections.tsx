@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Locale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
-import { getTopCategories } from "@/lib/catalog/taxonomy";
+import { homeCategoryEntries } from "@/lib/site/home-category-entries";
 import { getNewArrivals, getFeaturedProducts } from "@/lib/catalog/products";
 import { getFeaturedCollections } from "@/lib/catalog/collections";
 import { insights } from "@/lib/catalog/insights";
@@ -18,7 +18,7 @@ function SectionIntro({ locale, copy, path, id }: { locale: Locale; copy: { eyeb
 }
 
 export function CategoriesSection({ locale }: { locale: Locale }) {
-  return <section className="section-space" aria-labelledby="categories-title"><Container><SectionIntro locale={locale} copy={getDictionary(locale).home.categories} path="/products" id="categories-title" /><div className="category-grid-v3">{getTopCategories().map((category) => <CategoryCard key={category.id} category={category} locale={locale} />)}</div></Container></section>;
+  return <section className="section-space" aria-labelledby="categories-title"><Container><SectionIntro locale={locale} copy={getDictionary(locale).home.categories} path="/products" id="categories-title" /><div className="category-grid-v3">{homeCategoryEntries.map((entry) => <CategoryCard key={entry.id} entry={entry} locale={locale} />)}</div></Container></section>;
 }
 
 export function NewArrivalsSection({ locale }: { locale: Locale }) {

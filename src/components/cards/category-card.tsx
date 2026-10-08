@@ -6,9 +6,15 @@ import { localizedPath } from "@/lib/site/paths";
 import { CatalogMedia } from "@/components/catalog-media";
 import { getDictionary } from "@/i18n/dictionaries";
 import { categoryVisuals } from "@/lib/site/visual-assets";
+import type { HomeCategoryEntry } from "@/lib/site/home-category-entries";
 
-export function CategoryCard({ category, locale }: { category: Category; locale: Locale }) {
-  const href = localizedPath(locale, `/products/${getCategorySlugPath(category).join("/")}`);
+type Props = { category: Category; locale: Locale; entry?: never } | { entry: HomeCategoryEntry; locale: Locale; category?: never };
+
+export function CategoryCard(props: Props) {
+  const { locale } = props;
+  const category = props.entry ?? props.category;
+  const path = props.entry ? props.entry.path : `/products/${getCategorySlugPath(props.category).join("/")}`;
+  const href = localizedPath(locale, path);
   const image = categoryVisuals[category.id];
   return <article className="category-card-v3">
     <Link href={href} aria-label={`${getDictionary(locale).common.explore} ${category.name[locale]}`} className="category-card-link">

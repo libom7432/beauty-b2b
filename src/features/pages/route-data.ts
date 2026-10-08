@@ -17,6 +17,15 @@ export function categoryMetadata(locale: Locale, slugs: string[]) {
   return pageMetadata({ locale, path: `/products/${getCategorySlugPath(category).join("/")}`, title: category.seo.title[locale], description: category.seo.description[locale], indexable: category.seo.indexable });
 }
 
+export function legacyToolsCareMetadata(locale: Locale) {
+  return pageMetadata({
+    locale, path: "/products/nail-tools-care",
+    title: locale === "zh" ? "美甲工具与护理" : "Nail Tools & Care",
+    description: locale === "zh" ? "分别探索美甲工具与美甲护理分类。" : "Explore the nail tools and nail care categories.",
+    indexable: false,
+  });
+}
+
 export function requireProduct(slug: string) {
   const product = getProductBySlug(slug);
   if (!product) notFound();

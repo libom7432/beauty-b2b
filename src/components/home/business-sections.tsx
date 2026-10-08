@@ -9,12 +9,17 @@ import { homeVisuals } from "@/lib/site/visual-assets";
 
 export function PrivateLabelSection({ locale }: { locale: Locale }) {
   const copy = getDictionary(locale).home.privateLabel;
-  return <section className="section-space" aria-labelledby="private-label-title"><Container className="editorial-split"><div className="private-label-art"><Image src={homeVisuals.privateLabel.src} alt={homeVisuals.privateLabel.alt[locale]} fill sizes="(max-width: 900px) 100vw, 50vw" className="private-label-image" style={{ objectPosition: homeVisuals.privateLabel.position }} /></div><div className="editorial-copy"><SectionHeading id="private-label-title" eyebrow={copy.eyebrow} title={copy.title} description={copy.body} /><ul className="editorial-list">{copy.items.map((item) => <li key={item}>{item}</li>)}</ul><Button href={localizedPath(locale, "/private-label")}>{copy.action}</Button></div></Container></section>;
+  return <section className="section-space home-private-label-section" aria-labelledby="private-label-title"><Container className="editorial-split"><div className="private-label-art"><Image src={homeVisuals.privateLabel.src} alt={homeVisuals.privateLabel.alt[locale]} fill sizes="(max-width: 900px) 100vw, 50vw" className="private-label-image" style={{ objectPosition: homeVisuals.privateLabel.position }} /></div><div className="editorial-copy"><SectionHeading id="private-label-title" eyebrow={copy.eyebrow} title={copy.title} description={copy.body} /><ul className="editorial-list">{copy.items.map((item) => <li key={item}>{item}</li>)}</ul><Button href={localizedPath(locale, "/private-label")}>{copy.action}</Button></div></Container></section>;
 }
 
 export function SolutionsSection({ locale }: { locale: Locale }) {
   const copy = getDictionary(locale).home.solutions;
-  return <section className="section-space solutions-section" aria-labelledby="solutions-title"><Container><div className="section-intro-v3"><SectionHeading id="solutions-title" eyebrow={copy.eyebrow} title={copy.title} description={copy.body} /></div><div className="solutions-grid">{copy.audiences.map((audience, index) => <article key={audience.title}><span>0{index + 1}</span><h3>{audience.title}</h3><p>{audience.body}</p></article>)}</div><Button href={localizedPath(locale, "/solutions")} variant="text">{getDictionary(locale).common.learnMore}</Button></Container></section>;
+  return <section className="section-space solutions-section" aria-labelledby="solutions-title"><Container><div className="section-intro-v3"><SectionHeading id="solutions-title" eyebrow={copy.eyebrow} title={copy.title} description={copy.body} /></div><div className="solutions-grid">{copy.audiences.map((audience, index) => <article key={audience.title}><span>0{index + 1}</span><h3>{audience.title}</h3><p>{audience.body}</p></article>)}</div><Button href={localizedPath(locale, "/solutions")} variant="text">{copy.action}</Button></Container></section>;
+}
+
+export function HowWeWorkSection({ locale }: { locale: Locale }) {
+  const copy = getDictionary(locale).home.howWeWork;
+  return <section className="section-space how-we-work-section" aria-labelledby="how-we-work-title"><Container><SectionHeading id="how-we-work-title" eyebrow={copy.eyebrow} title={copy.title} /><ol className="how-we-work-grid">{copy.steps.map((step, index) => <li key={step.title}><span>0{index + 1}</span><h3>{step.title}</h3><p>{step.body}</p></li>)}</ol></Container></section>;
 }
 
 export function WhySection({ locale }: { locale: Locale }) {

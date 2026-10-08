@@ -1,7 +1,7 @@
 import type { Locale } from "@/i18n/config";
 import { HeroSection } from "./hero-section";
-import { CategoriesSection, NewArrivalsSection, CollectionsSection, FeaturedProductsSection, InsightsSection } from "./catalog-sections";
-import { PrivateLabelSection, SolutionsSection, WhySection, QualitySection } from "./business-sections";
+import { CategoriesSection, NewArrivalsSection, CollectionsSection, InsightsSection } from "./catalog-sections";
+import { PrivateLabelSection, SolutionsSection, HowWeWorkSection } from "./business-sections";
 import { CtaSection } from "@/components/cta-section";
 
 export function HomePage({ locale }: { locale: Locale }) {
@@ -12,9 +12,7 @@ export function HomePage({ locale }: { locale: Locale }) {
     <CollectionsSection locale={locale} />
     <PrivateLabelSection locale={locale} />
     <SolutionsSection locale={locale} />
-    <FeaturedProductsSection locale={locale} />
-    <WhySection locale={locale} />
-    <QualitySection locale={locale} />
+    <HowWeWorkSection locale={locale} />
     <InsightsSection locale={locale} />
     <CtaSection locale={locale} />
   </main>;

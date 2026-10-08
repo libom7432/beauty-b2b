@@ -22,11 +22,13 @@ export function CategoriesSection({ locale }: { locale: Locale }) {
 }
 
 export function NewArrivalsSection({ locale }: { locale: Locale }) {
-  return <section className="section-space tinted-section" aria-labelledby="new-arrivals-title"><Container><SectionIntro locale={locale} copy={getDictionary(locale).home.newArrivals} path="/new-arrivals" id="new-arrivals-title" /><div className="product-grid-v3">{getNewArrivals().map((product) => <ProductCard key={product.id} product={product} locale={locale} />)}</div></Container></section>;
+  const arrivals = getNewArrivals();
+  return <section className="section-space tinted-section" aria-labelledby="new-arrivals-title"><Container><SectionIntro locale={locale} copy={getDictionary(locale).home.newArrivals} path="/new-arrivals" id="new-arrivals-title" /><div className={`product-grid-v3${arrivals.length === 2 ? " new-arrivals-grid-two" : ""}`}>{arrivals.map((product) => <ProductCard key={product.id} product={product} locale={locale} />)}</div></Container></section>;
 }
 
 export function CollectionsSection({ locale }: { locale: Locale }) {
-  return <section className="section-space" aria-labelledby="collections-title"><Container><SectionIntro locale={locale} copy={getDictionary(locale).home.collections} path="/collections" id="collections-title" /><div className="collection-grid-v3">{getFeaturedCollections().map((collection) => <CollectionCard key={collection.id} collection={collection} locale={locale} />)}</div></Container></section>;
+  const homeCollections = getFeaturedCollections().filter((collection) => ["minimal", "french", "chrome"].includes(collection.slug));
+  return <section className="section-space home-collections-section" aria-labelledby="collections-title"><Container><SectionIntro locale={locale} copy={getDictionary(locale).home.collections} path="/collections" id="collections-title" /><div className="collection-grid-v3">{homeCollections.map((collection) => <CollectionCard key={collection.id} collection={collection} locale={locale} />)}</div></Container></section>;
 }
 
 export function FeaturedProductsSection({ locale }: { locale: Locale }) {
@@ -34,5 +36,5 @@ export function FeaturedProductsSection({ locale }: { locale: Locale }) {
 }
 
 export function InsightsSection({ locale }: { locale: Locale }) {
-  return <section className="section-space tinted-section" aria-labelledby="insights-title"><Container><SectionIntro locale={locale} copy={getDictionary(locale).home.insights} path="/insights" id="insights-title" /><div className="article-grid-v3">{insights.map((article) => <ArticleCard key={article.id} article={article} locale={locale} />)}</div></Container></section>;
+  return <section className="section-space tinted-section insights-section" aria-labelledby="insights-title"><Container><SectionIntro locale={locale} copy={getDictionary(locale).home.insights} path="/insights" id="insights-title" /><div className="article-grid-v3">{insights.map((article) => <ArticleCard key={article.id} article={article} locale={locale} />)}</div></Container></section>;
 }

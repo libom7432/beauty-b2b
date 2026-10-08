@@ -4,6 +4,7 @@ export type VisualAsset = {
   src: string;
   alt: LocalizedText;
   position?: string;
+  mobilePosition?: string;
 };
 
 // Replace these paths with verified product photography when it becomes available.
@@ -14,7 +15,8 @@ export const homeVisuals = {
       en: "Beauty model showing soft pink French manicure nails",
       zh: "展示柔粉色法式美甲的美妆模特",
     },
-    position: "84% center",
+    position: "92% center",
+    mobilePosition: "95% center",
   },
   privateLabel: {
     src: "/images/private-label/private-label-v1.png",

@@ -3,13 +3,14 @@ import type { Locale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/dictionaries";
 import { getTopCategories } from "@/lib/catalog/taxonomy";
 import { localizedPath } from "@/lib/site/paths";
+import { emailUrl, siteConfig, whatsappUrl } from "@/lib/site/config";
 import { Button } from "./ui/button";
 import { Container } from "./ui/container";
 import { LanguageSwitcher } from "./language-switcher";
 import { ProductsMegaMenu } from "./products-mega-menu";
 
 export function SiteHeader({ locale }: { locale: Locale }) {
-  const { brand, nav } = getDictionary(locale);
+  const { brand, nav, topBar } = getDictionary(locale);
   const topCategories = getTopCategories();
   const links = [
     ["new-arrivals", nav.newArrivals], ["collections", nav.collections],
@@ -18,6 +19,13 @@ export function SiteHeader({ locale }: { locale: Locale }) {
   ] as const;
 
   return <header className="site-header">
+    <div className="top-contact-bar"><Container className="top-contact-inner">
+      <div className="top-contact-links">
+        <a href={whatsappUrl()} target="_blank" rel="noopener noreferrer"><span className="top-contact-label">{topBar.whatsapp}</span><span className="top-contact-detail">{siteConfig.contact.whatsapp.display}</span></a>
+        <a href={emailUrl()}><span className="top-contact-label">{topBar.email}</span><span className="top-contact-detail">{siteConfig.contact.email}</span></a>
+      </div>
+      <span className="top-contact-note">{topBar.note}</span>
+    </Container></div>
     <Container className="header-inner">
       <Link className="brand-mark" href={localizedPath(locale)}>{brand}</Link>
       <nav className="desktop-navigation" aria-label={nav.primary}>

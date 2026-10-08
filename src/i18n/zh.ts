@@ -3,6 +3,7 @@ import type en from "./en";
 const zh: typeof en = {
   brand: "BRAND.",
   nav: { products: "产品", productsMenuToggle: "展开或收起产品分类", allProducts: "全部产品", newArrivals: "新品", collections: "主题系列", privateLabel: "自有品牌", solutions: "合作方案", about: "关于", insights: "行业洞察", contact: "联系", quote: "获取报价", menu: "打开菜单", primary: "主导航", language: "语言" },
+  topBar: { whatsapp: "WhatsApp", email: "邮箱", note: "自有品牌 · OEM · ODM" },
   common: { explore: "探索", viewAll: "查看全部", learnMore: "了解更多", concept: "概念示意", comingSoon: "内容筹备中", backHome: "返回首页", requestQuote: "获取报价", noProducts: "经核实的产品目录就绪后，将在这里补充产品详情。", collectionKinds: { style: "风格", occasion: "场景", market: "市场", audience: "受众" } },
   home: {
     hero: { eyebrow: "专业美甲产品  /  自有品牌", first: "专业美甲产品", second: "为你的品牌而打造。", body: "探索穿戴甲、凝胶甲油、美甲灯和美甲工具，以及自有品牌、OEM 与 ODM 合作方向。", primary: "探索产品", secondary: "启动自有品牌项目", visual: "美甲产品  /  品牌可能" },

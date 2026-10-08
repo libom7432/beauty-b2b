@@ -11,7 +11,9 @@ export function CategoryCard({ category, locale }: { category: Category; locale:
   const href = localizedPath(locale, `/products/${getCategorySlugPath(category).join("/")}`);
   const image = categoryVisuals[category.id];
   return <article className="category-card-v3">
-    <Link href={href} aria-label={`${getDictionary(locale).common.explore} ${category.name[locale]}`} className="card-media-link"><CatalogMedia visual={category.visual} image={image} alt={image?.alt[locale]} sizes="(max-width: 680px) 100vw, (max-width: 900px) 50vw, 33vw" /></Link>
-    <div className="card-copy"><div><h3>{category.name[locale]}</h3><p>{category.shortDescription[locale]}</p></div><Link href={href} className="text-link">{getDictionary(locale).common.explore} <span aria-hidden="true">↗</span></Link></div>
+    <Link href={href} aria-label={`${getDictionary(locale).common.explore} ${category.name[locale]}`} className="category-card-link">
+      <div className="card-media-link"><CatalogMedia visual={category.visual} image={image} alt={image?.alt[locale]} sizes="(max-width: 680px) 100vw, (max-width: 900px) 50vw, 33vw" /></div>
+      <div className="card-copy"><div><h3>{category.name[locale]}</h3><p>{category.shortDescription[locale]}</p></div><span className="text-link">{getDictionary(locale).common.explore} <span aria-hidden="true" className="category-card-arrow">↗</span></span></div>
+    </Link>
   </article>;
 }

@@ -57,14 +57,24 @@
 .catalog-artwork { display: block; width: 100%; height: 100%; }
 .card-media-link { display: block; overflow: hidden; background: var(--color-blush); }
 .card-media-link .catalog-artwork { transition: transform .45s; }
-.card-media-link:hover .catalog-artwork { transform: scale(1.035); }
-.category-grid-v3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 52px 26px; }
+.category-grid-v3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 42px 26px; }
 .category-card-v3, .product-card-v3, .collection-card-v3 { min-width: 0; }
+.category-card-link { display: block; height: 100%; }
+.category-card-link:focus-visible { outline: 2px solid #946c61; outline-offset: 6px; }
 .category-card-v3 .card-media-link { aspect-ratio: 1 / 1.06; }
+.category-card-v3 .catalog-media > :is(img, svg) { transition: transform .5s cubic-bezier(.22, 1, .36, 1); }
+.category-card-arrow { display: inline-block; transition: transform .5s cubic-bezier(.22, 1, .36, 1); }
+.category-card-link:focus-visible .category-card-arrow { transform: translateX(4px); }
 .category-card-v3 .card-copy { display: flex; justify-content: space-between; gap: 18px; padding-top: 18px; }
 .card-copy h3, .collection-card-copy h3 { margin: 0 0 8px; font-family: var(--font-editorial); font-size: clamp(1.8rem, 2.3vw, 2.65rem); font-weight: 400; letter-spacing: -.035em; line-height: 1.08; }
 .card-copy p, .collection-card-copy > p:last-child { max-width: 275px; margin: 0; color: var(--color-muted); font-size: 13px; line-height: 1.6; }
 .card-copy .text-link { align-self: end; }
+@media (hover: hover) and (pointer: fine) {
+  .card-media-link:hover .catalog-artwork { transform: scale(1.035); }
+  .category-card-v3:hover .catalog-media > :is(img, svg) { transform: scale(1.03); }
+  .category-card-v3:hover .category-card-arrow { transform: translateX(4px); }
+  .category-card-v3:hover .text-link { color: #9a665b; }
+}
 .product-grid-v3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
 .product-card-v3 .card-media-link { aspect-ratio: 4 / 4.5; }
 .product-card-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 15px; color: #98766c; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }

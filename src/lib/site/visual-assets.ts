@@ -51,6 +51,27 @@ export const categoryVisuals: Partial<Record<string, VisualAsset>> = {
     },
     position: "42% center",
   },
+  "nail-machines": {
+    src: "/images/categories/nail-machines-v1.png",
+    alt: {
+      en: "Nail drill machine with handpiece and interchangeable bits",
+      zh: "配有手柄与可更换磨头的美甲打磨机",
+    },
+  },
+  "nail-tools-care": {
+    src: "/images/categories/nail-tools-care-v1.png",
+    alt: {
+      en: "Manicure brushes, files, cuticle tools and care bottles on a work table",
+      zh: "工作台上的美甲刷、锉条、死皮工具与护理瓶",
+    },
+  },
+  "nail-accessories": {
+    src: "/images/categories/nail-accessories-v1.png",
+    alt: {
+      en: "Nail art charms, rhinestones and decorative accents beside press-on nails",
+      zh: "穿戴甲旁的美甲饰品、水钻与装饰配件",
+    },
+  },
 };
 
 export const collectionVisuals: Partial<Record<string, VisualAsset>> = {

@@ -30,20 +30,39 @@ export type AttributeDefinition = {
 };
 
 export type ProductImage = {
+  id: string;
+  role: "primary" | "detail" | "variant";
   src?: string;
   alt: LocalizedText;
   visual: VisualKind;
+  isPlaceholder: boolean;
+};
+
+export type VariantMoq = { quantity: number; unit: string; note?: LocalizedText };
+export type PriceTier = { minQuantity: number; unitPriceUsd: number };
+export type VariantPricing = {
+  currency: "USD";
+  isTestData: true;
+  tiers: PriceTier[];
 };
 
 export type ProductVariant = {
   id: string;
   sku: string;
   attributes: Record<string, AttributeValue>;
+  moq: VariantMoq;
+  packageContents?: { quantity: number; unit: string };
+  pricing: VariantPricing;
   imageIndex?: number;
 };
 
-export type CustomizationOption =
+export type CustomizationOptionId =
   | "product" | "color" | "material" | "finish" | "logo" | "packaging";
+export type CustomizationOption = {
+  id: CustomizationOptionId;
+  name: LocalizedText;
+  moq?: VariantMoq;
+};
 
 export type RfqField =
   | "quantity" | "destination" | "targetMarket" | "branding" | "packaging" | "notes";
@@ -51,7 +70,7 @@ export type RfqField =
 export type Product = {
   id: string;
   slug: string;
-  sku: string;
+  productCode: string; // Family reference; purchasable SKUs live on variants.
   name: LocalizedText;
   shortDescription: LocalizedText;
   description: LocalizedText;
@@ -62,8 +81,8 @@ export type Product = {
   attributes: Record<string, AttributeValue>;
   variants: ProductVariant[];
   collections: string[];
+  oemOdm: { oem: boolean; odm: boolean; note?: LocalizedText };
   customizationOptions: CustomizationOption[];
-  moq?: { quantity: number; unit: string; note?: LocalizedText };
   leadTime?: { minDays?: number; maxDays?: number; note?: LocalizedText };
   featured: boolean;
   newArrival: boolean;

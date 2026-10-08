@@ -10,7 +10,7 @@ export function ProductCard({ product, locale }: { product: Product; locale: Loc
   return <article className="product-card-v3">
     <Link href={href} aria-label={product.name[locale]} className="product-card-link">
       <div className="card-media-link"><CatalogMedia visual={product.images[0]?.visual ?? "press-on"} image={product.images[0]} alt={product.images[0]?.alt[locale] ?? ""} /></div>
-      <div className="product-card-meta"><span>{product.isMock ? getDictionary(locale).common.concept : product.sku}</span><span className="product-card-arrow" aria-hidden="true">↗</span></div>
+      <div className="product-card-meta"><span>{product.isMock ? getDictionary(locale).common.concept : product.productCode}</span><span className="product-card-arrow" aria-hidden="true">↗</span></div>
       <h3>{product.name[locale]}</h3>
       <p>{product.shortDescription[locale]}</p>
     </Link>

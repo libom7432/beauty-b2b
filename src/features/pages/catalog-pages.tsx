@@ -11,8 +11,8 @@ import { CategoryCard } from "@/components/cards/category-card";
 import { ProductCard } from "@/components/cards/product-card";
 import { CollectionCard } from "@/components/cards/collection-card";
 import { CatalogMedia } from "@/components/catalog-media";
-import { Button } from "@/components/ui/button";
 import { Container } from "@/components/ui/container";
+import { ProductDetailPanel } from "@/components/product-detail-panel";
 
 function Intro({ eyebrow, title, body }: { eyebrow: string; title: string; body: string }) {
   return <div className="route-intro"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{body}</p></div>;
@@ -66,7 +66,20 @@ export function NewArrivalsPage({ locale }: { locale: Locale }) {
 
 export function ProductDetailPage({ locale, product }: { locale: Locale; product: Product }) {
   const copy = getDictionary(locale);
-  return <main><Container className="detail-grid"><CatalogMedia visual={product.images[0]?.visual ?? "press-on"} image={product.images[0]} alt={product.images[0]?.alt[locale] ?? ""} /><div className="detail-copy"><p className="eyebrow">{copy.common.concept}</p><h1>{product.name[locale]}</h1><p>{product.description[locale]}</p><div className="detail-divider" /><p className="detail-note">{copy.home.featured.body}</p><Button href={localizedPath(locale, "/rfq")}>{copy.common.requestQuote}</Button></div></Container></main>;
+  const hierarchy = [product.categoryId, product.subcategoryId, product.childCategoryId]
+    .filter((id): id is string => Boolean(id))
+    .map((id) => getCategoryById(id))
+    .filter((category): category is Category => Boolean(category));
+  const related = products.filter((item) => item.id !== product.id && item.categoryId === product.categoryId).slice(0, 4);
+  return <main><Container>
+    <nav className="route-breadcrumb product-detail-breadcrumb" aria-label={copy.nav.products}>
+      <Link href={localizedPath(locale, "/products")}>{copy.nav.products}</Link>
+      {hierarchy.map((category) => <span key={category.id} className="product-breadcrumb-part"><span aria-hidden="true">/</span><Link href={localizedPath(locale, `/products/${getCategorySlugPath(category).join("/")}`)}>{category.name[locale]}</Link></span>)}
+      <span className="product-breadcrumb-part"><span aria-hidden="true">/</span><span aria-current="page">{product.name[locale]}</span></span>
+    </nav>
+    <ProductDetailPanel product={product} locale={locale} />
+    {related.length > 0 && <section className="product-related" aria-labelledby="product-related-title"><h2 id="product-related-title">{copy.detail.related}</h2><div className="product-grid-v3">{related.map((item) => <ProductCard key={item.id} product={item} locale={locale} />)}</div></section>}
+  </Container></main>;
 }
 
 export function CollectionsIndexPage({ locale }: { locale: Locale }) {

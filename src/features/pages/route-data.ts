@@ -34,7 +34,7 @@ export function requireProduct(slug: string) {
 }
 export function productMetadata(locale: Locale, slug: string) {
   const product = requireProduct(slug);
-  return pageMetadata({ locale, path: `/product/${slug}`, title: product.seo.title[locale], description: product.seo.description[locale], indexable: product.seo.indexable });
+  return pageMetadata({ locale, path: `/product/${slug}`, title: product.seo.title[locale], description: product.seo.description[locale], indexable: !product.isMock && product.seo.indexable });
 }
 
 export function requireCollection(slug: string) {

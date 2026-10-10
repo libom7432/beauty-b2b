@@ -8,7 +8,11 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "validate:mock": "node scripts/validate-mock-products.mjs"
+    "validate:mock": "node scripts/validate-mock-products.mjs",
+    "test:search": "node scripts/test-product-search.mjs",
+    "test:filter": "node scripts/test-product-filter.mjs",
+    "test:sort": "node scripts/test-product-sort.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "next": "16.3.8",
@@ -16,6 +20,7 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "26.6.4",
     "@types/react": "19.3.0",

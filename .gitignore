@@ -8,3 +8,5 @@ next-env.d.ts
 .DS_Store
 work/
 outputs/
+playwright-report/
+test-results/

@@ -8,9 +8,10 @@ import { Button } from "./ui/button";
 import { Container } from "./ui/container";
 import { LanguageSwitcher } from "./language-switcher";
 import { ProductsMegaMenu } from "./products-mega-menu";
+import { HeaderSearch } from "./header-search";
 
 export function SiteHeader({ locale }: { locale: Locale }) {
-  const { brand, nav, topBar } = getDictionary(locale);
+  const { brand, nav, topBar, search } = getDictionary(locale);
   const topCategories = getTopCategories();
   const links = [
     ["new-arrivals", nav.newArrivals], ["collections", nav.collections],
@@ -35,8 +36,9 @@ export function SiteHeader({ locale }: { locale: Locale }) {
         </ProductsMegaMenu>
         {links.map(([path, label]) => <Link key={path} href={localizedPath(locale, `/${path}`)}>{label}</Link>)}
       </nav>
-      <div className="header-actions"><LanguageSwitcher locale={locale} label={nav.language} /><Button href={localizedPath(locale, "/rfq")} className="header-quote">{nav.quote}</Button>
+      <div className="header-actions"><HeaderSearch locale={locale} /><LanguageSwitcher locale={locale} label={nav.language} /><Button href={localizedPath(locale, "/rfq")} className="header-quote">{nav.quote}</Button>
         <details className="mobile-navigation"><summary aria-label={nav.menu}><span /><span /></summary><nav className="mobile-navigation-panel" aria-label={nav.menu}>
+          <Link href={localizedPath(locale, "/search")}>{search.action}</Link>
           <Link href={localizedPath(locale, "/products")}>{nav.allProducts}</Link>
           {topCategories.map((category) => <Link className="mobile-category-link" key={category.id} href={localizedPath(locale, `/products/${category.slug}`)}>{category.name[locale]}</Link>)}
           {links.map(([path, label]) => <Link key={path} href={localizedPath(locale, `/${path}`)}>{label}</Link>)}

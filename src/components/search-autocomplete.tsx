@@ -44,7 +44,10 @@ export function SearchAutocomplete({ locale, initialQuery = "", compact = false,
   const open = focused && Array.from(query).length >= 2 && settled === query;
   const options = open ? suggestions.length + 1 : 0;
   const optionId = (index: number) => `${id}-option-${index}`;
-  const navigate = (href: string) => { setFocused(false); setActiveIndex(-1); onNavigate?.(); router.push(href); };
+  const navigate = (href: string) => {
+    if (!window.dispatchEvent(new CustomEvent("site:navigate-request", { cancelable: true, detail: { href } }))) return;
+    setFocused(false); setActiveIndex(-1); onNavigate?.(); router.push(href);
+  };
 
   return <div ref={root} className={`search-autocomplete${compact ? " search-autocomplete-compact" : ""}`} onBlurCapture={(event) => {
     if (!root.current?.contains(event.relatedTarget as Node | null)) { setFocused(false); setActiveIndex(-1); }

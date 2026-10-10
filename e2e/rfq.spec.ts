@@ -8,6 +8,163 @@ async function addProduct(page: Page, locale: "en" | "zh" = "en") {
   await page.locator(".inquiry-list-footer").getByRole("link", { name: locale === "zh" ? "获取报价" : "Request a Quote" }).click();
 }
 
+async function fillValidForm(page: Page, locale: "en" | "zh" = "en") {
+  await page.locator("#rfq-full-name").fill(locale === "zh" ? "王采购" : "Jane Buyer");
+  await page.locator("#rfq-email").fill("buyer@example.com");
+  await page.locator("#rfq-company").fill(locale === "zh" ? "美甲工作室" : "Nail Studio Ltd");
+  await page.locator("#rfq-country").selectOption(locale === "zh" ? "CN" : "US");
+  await page.locator("#rfq-requirements").fill(locale === "zh" ? "请提供该商品的批发规格和交期信息。" : "Please quote this product for our next store launch.");
+}
+
+test("empty form leaves without warning; restored input is clean", async ({ page }) => {
+  await page.goto("/inquiry/request-quote");
+  const initiallyProtected = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(initiallyProtected).toBe(false);
+  await page.locator("#rfq-full-name").fill("Jane");
+  await page.locator("#rfq-full-name").fill("");
+  const registered = await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(registered).toBe(false);
+  await page.locator(".rfq-actions").getByRole("link", { name: "Back to Inquiry" }).click();
+  await expect(page).toHaveURL(/\/inquiry$/);
+  await expect(page.getByRole("dialog", { name: "Leave this page?" })).toHaveCount(0);
+});
+
+for (const locale of ["en", "zh"] as const) {
+  test(`${locale} dirty form confirms leaving and restores focus on Stay or Escape`, async ({ page }) => {
+    const prefix = locale === "zh" ? "/zh" : "";
+    const back = locale === "zh" ? "返回询盘清单" : "Back to Inquiry";
+    const title = locale === "zh" ? "离开此页面？" : "Leave this page?";
+    const stay = locale === "zh" ? "留在页面" : "Stay on Page";
+    const leave = locale === "zh" ? "离开页面" : "Leave Page";
+    await page.goto(`${prefix}/inquiry/request-quote`);
+    await page.locator("#rfq-full-name").fill(locale === "zh" ? "王采购" : "Jane Buyer");
+    const nativeGuardRegistered = await page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    expect(nativeGuardRegistered).toBe(true);
+    const backLink = page.locator(".rfq-actions").getByRole("link", { name: back });
+    await backLink.click();
+    const dialog = page.getByRole("dialog", { name: title });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("button", { name: stay })).toBeFocused();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: leave })).toBeFocused();
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => document.querySelector(".rfq-leave-dialog")?.contains(document.activeElement))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(backLink).toBeFocused();
+    await expect(page.locator("#rfq-full-name")).toHaveValue(locale === "zh" ? "王采购" : "Jane Buyer");
+    await backLink.click();
+    await dialog.getByRole("button", { name: stay }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(backLink).toBeFocused();
+    await backLink.click();
+    await dialog.getByRole("button", { name: leave }).click();
+    await expect(page).toHaveURL(new RegExp(`${prefix}/inquiry$`));
+  });
+}
+
+test("language switch asks before discarding English RFQ input", async ({ page }) => {
+  await page.goto("/inquiry/request-quote");
+  await page.locator("#rfq-full-name").fill("Jane Buyer");
+  await page.locator(".site-header .language-switcher").getByRole("link", { name: "中文" }).click();
+  const dialog = page.getByRole("dialog", { name: "Leave this page?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Stay on Page" }).click();
+  await expect(page).toHaveURL(/\/inquiry\/request-quote$/);
+  await expect(page.locator("#rfq-full-name")).toHaveValue("Jane Buyer");
+  await page.locator(".site-header .language-switcher").getByRole("link", { name: "中文" }).click();
+  await dialog.getByRole("button", { name: "Leave Page" }).click();
+  await expect(page).toHaveURL(/\/zh\/inquiry\/request-quote$/);
+});
+
+test("keyboard autocomplete navigation respects the RFQ leave guard", async ({ page }) => {
+  await page.goto("/inquiry/request-quote");
+  await page.locator("#rfq-full-name").fill("Jane Buyer");
+  await page.getByRole("button", { name: "Search products" }).click();
+  const search = page.getByRole("combobox", { name: "Search products" });
+  await search.fill("DEMO-PO-001-N");
+  await expect(page.locator('.search-suggestion-item[href="/product/almond-press-on-concept"]')).toBeVisible();
+  await search.press("ArrowDown");
+  await search.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Leave this page?" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Leave Page" }).click();
+  await expect(page).toHaveURL(/\/product\/almond-press-on-concept$/);
+});
+
+test("refresh of dirty RFQ uses the native beforeunload guard", async ({ page }) => {
+  await page.goto("/inquiry/request-quote");
+  await page.locator("#rfq-full-name").fill("Jane Buyer");
+  const dialogTypes: string[] = [];
+  page.on("dialog", async (dialog) => {
+    dialogTypes.push(dialog.type());
+    await dialog.accept();
+  });
+  await page.reload();
+  expect(dialogTypes).toEqual(["beforeunload"]);
+  await expect(page.locator("#rfq-full-name")).toHaveValue("");
+});
+
+test("Review stays current when inquiry quantity, products, or SKU availability changes", async ({ page, context }) => {
+  await page.goto("/products/press-on-nails");
+  for (const index of [0, 1]) {
+    await page.locator(".product-card-listing").nth(index).getByRole("button", { name: /Add to Inquiry/ }).click();
+  }
+  await page.goto("/inquiry");
+  await expect(page.locator(".inquiry-row")).toHaveCount(2);
+  await page.locator(".inquiry-list-footer").getByRole("link", { name: "Request a Quote" }).click();
+  await fillValidForm(page);
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+  await expect(page.getByRole("heading", { name: "Review your inquiry" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Leave this page?" })).not.toBeVisible();
+  await page.getByRole("button", { name: "Edit Information" }).click();
+  await expect(page.locator("#rfq-full-name")).toHaveValue("Jane Buyer");
+  await expect(page.getByRole("dialog", { name: "Leave this page?" })).not.toBeVisible();
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+
+  const secondTab = await context.newPage();
+  await secondTab.goto("/inquiry");
+  await secondTab.evaluate(() => {
+    const key = "beauty-b2b-inquiry-v1";
+    const items = JSON.parse(localStorage.getItem(key) ?? "[]");
+    items[0].quantity = 375;
+    localStorage.setItem(key, JSON.stringify(items));
+  });
+  await expect(page.locator(".rfq-review .rfq-summary-item").first()).toContainText("375");
+  await secondTab.evaluate(() => {
+    const key = "beauty-b2b-inquiry-v1";
+    const items = JSON.parse(localStorage.getItem(key) ?? "[]");
+    items.splice(0, 1);
+    localStorage.setItem(key, JSON.stringify(items));
+  });
+  await expect(page.getByRole("heading", { name: "Review your inquiry" })).toBeVisible();
+  await expect(page.locator(".rfq-review .rfq-summary-item")).toHaveCount(1);
+  await secondTab.evaluate(() => localStorage.setItem("beauty-b2b-inquiry-v1", "[]"));
+  await expect(page.getByRole("heading", { name: "Review your inquiry" })).toHaveCount(0);
+  await expect(page.getByText("Your inquiry list is empty.")).toBeVisible();
+  await expect(page.locator("#rfq-full-name")).toHaveValue("Jane Buyer");
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+  await expect(page.getByRole("heading", { name: "Review your inquiry" })).toHaveCount(0);
+  await secondTab.evaluate(() => localStorage.setItem("beauty-b2b-inquiry-v1", JSON.stringify([{ productId: "missing", sku: "STALE", quantity: 100, addedAt: new Date().toISOString() }])));
+  await expect(page.getByText("1 saved inquiry items are invalid or no longer available.")).toBeVisible();
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+  await expect(page.getByRole("heading", { name: "Review your inquiry" })).toHaveCount(0);
+  await secondTab.close();
+});
+
 test("empty inquiry and required fields cannot reach review", async ({ page }) => {
   await page.goto("/inquiry/request-quote");
   await expect(page.getByRole("heading", { name: "Request a Quote" })).toBeVisible();

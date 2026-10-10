@@ -25,6 +25,7 @@ function load(relativePath) {
 const { mockProducts } = load("src/lib/catalog/mock-products");
 const { validateRFQDraft, RFQ_FIELD_LIMITS } = load("src/lib/rfq/validation");
 const { inquiryItemsToRFQDraftItems, snapshotRFQItems } = load("src/lib/rfq/items");
+const { createInitialRFQFormValues, isRFQFormDirty } = load("src/lib/rfq/form-state");
 const product = mockProducts[0];
 const variant = product.variants[0];
 const base = {
@@ -44,6 +45,20 @@ function expectError(input, field, code, source = mockProducts) {
 }
 
 test("valid draft", () => assert.equal(validateRFQDraft(base, mockProducts).ok, true));
+test("empty RFQ form is clean and restored text becomes clean again", () => {
+  const initial = createInitialRFQFormValues();
+  assert.equal(isRFQFormDirty(initial), false);
+  assert.equal(isRFQFormDirty({ ...initial, contact: { ...initial.contact, fullName: "Jane" } }), true);
+  assert.equal(isRFQFormDirty({ ...initial, contact: { ...initial.contact, fullName: "" } }), false);
+});
+test("optional selections and requirements track dirty state", () => {
+  const initial = createInitialRFQFormValues();
+  assert.equal(isRFQFormDirty({ ...initial, buyerType: "wholesaler" }), true);
+  assert.equal(isRFQFormDirty({ ...initial, customization: ["oem"] }), true);
+  assert.equal(isRFQFormDirty({ ...initial, purchaseTimeline: "planning" }), true);
+  assert.equal(isRFQFormDirty({ ...initial, requirements: "Please quote" }), true);
+  assert.equal(isRFQFormDirty({ ...initial, customization: [] }), false);
+});
 test("missing full name", () => expectError(contact({ fullName: " " }), "contact.fullName", "REQUIRED"));
 test("invalid email", () => expectError(contact({ email: "not-an-email" }), "contact.email", "INVALID_EMAIL"));
 test("empty company name", () => expectError(contact({ companyName: "  " }), "contact.companyName", "REQUIRED"));

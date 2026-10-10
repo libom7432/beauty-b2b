@@ -225,6 +225,14 @@
 .rfq-review-content dd { margin: 0; }
 .rfq-review-content p { overflow-wrap: anywhere; font-size: 13px; line-height: 1.7; }
 .rfq-review-requirements { white-space: pre-wrap; }
+.rfq-leave-dialog { box-sizing: border-box; width: min(430px, calc(100vw - 36px)); max-width: none; max-height: calc(100dvh - 36px); margin: auto; padding: 28px; overflow: auto; border: var(--hairline); background: var(--color-paper); color: var(--color-ink); box-shadow: 0 20px 50px rgb(30 22 20 / 20%); }
+.rfq-leave-dialog::backdrop { background: rgb(30 22 20 / 48%); }
+.rfq-leave-dialog h2 { margin: 0 0 12px; font-family: var(--font-editorial); font-size: 1.8rem; font-weight: 400; }
+.rfq-leave-dialog p { margin: 0; color: var(--color-muted); font-size: 13px; line-height: 1.6; }
+.rfq-leave-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.rfq-leave-actions button { min-height: 44px; padding: 9px 16px; border: var(--hairline); background: transparent; color: var(--color-ink); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.rfq-leave-actions button:last-child { border-color: #946c61; background: #946c61; color: #fff; }
+.rfq-leave-actions button:focus-visible { outline: 2px solid #946c61; outline-offset: 3px; }
 @media (max-width: 800px) { .rfq-layout { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 540px) { .rfq-field-grid, .rfq-options { grid-template-columns: minmax(0, 1fr); } .rfq-field-error[data-empty="true"] { display: none; } .rfq-summary { padding: 18px; } .rfq-actions button { width: 100%; } .rfq-review-content dl { grid-template-columns: minmax(0, 1fr); gap: 3px; } .rfq-review-content dd { margin-bottom: 12px; } .inquiry-list-footer { flex-wrap: wrap; } }
 @media (max-width: 680px) {

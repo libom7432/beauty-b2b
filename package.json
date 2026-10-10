@@ -13,6 +13,7 @@
     "test:filter": "node scripts/test-product-filter.mjs",
     "test:sort": "node scripts/test-product-sort.mjs",
     "test:inquiry": "node scripts/test-inquiry.mjs",
+    "test:rfq": "node scripts/test-rfq.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

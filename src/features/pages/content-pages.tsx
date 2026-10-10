@@ -16,6 +16,7 @@ export function StaticLandingPage({ locale, page }: { locale: Locale; page: Stat
     {page === "privateLabel" && <ul className="static-list">{copy.home.privateLabel.items.map((item) => <li key={item}>{item}</li>)}</ul>}
     {page === "solutions" && <div className="solutions-grid static-solutions">{copy.home.solutions.audiences.map((audience, index) => <article key={audience.title}><span>0{index + 1}</span><h2>{audience.title}</h2><p>{audience.body}</p></article>)}</div>}
     {page !== "rfq" && page !== "contact" && <Button href={localizedPath(locale, "/rfq")}>{copy.common.requestQuote}</Button>}
+    {page === "rfq" && <Button href={localizedPath(locale, "/inquiry")}>{copy.inquiry.title}</Button>}
   </Container></main>;
 }
 

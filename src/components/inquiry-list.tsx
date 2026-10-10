@@ -75,7 +75,7 @@ export function InquiryList({ locale }: { locale: Locale }) {
         <div className="inquiry-row-actions"><QuantityInput key={`${item.sku}:${item.quantity}`} sku={item.sku} quantity={item.quantity} label={copy.quantity} updateQuantity={updateQuantity} /><button type="button" onClick={() => handleRemove(item.sku)} aria-label={`${copy.remove}: ${product.name[locale]} ${item.sku}`}>{copy.remove}</button></div>
       </article>;
     })}
-    {ready && items.length > 0 && <div className="inquiry-list-footer"><Link href={localizedPath(locale, "/products")}>{copy.continueShopping}</Link><button type="button" onClick={() => confirmDialog.current?.showModal()}>{copy.clear}</button></div>}
+    {ready && items.length > 0 && <div className="inquiry-list-footer"><Link href={localizedPath(locale, "/products")}>{copy.continueShopping}</Link><Link href={localizedPath(locale, "/inquiry/request-quote")}>{getDictionary(locale).rfqForm.title}</Link><button type="button" onClick={() => confirmDialog.current?.showModal()}>{copy.clear}</button></div>}
     <dialog className="inquiry-confirm-dialog" ref={confirmDialog} aria-labelledby="inquiry-clear-title" aria-describedby="inquiry-clear-description">
       <h2 id="inquiry-clear-title">{copy.clearConfirmTitle}</h2><p id="inquiry-clear-description">{copy.clearConfirmBody}</p>
       <div className="inquiry-confirm-actions"><button type="button" autoFocus onClick={() => confirmDialog.current?.close()}>{copy.cancel}</button><button type="button" onClick={handleClear}>{copy.confirmClear}</button></div>

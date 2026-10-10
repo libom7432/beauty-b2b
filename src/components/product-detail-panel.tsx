@@ -8,6 +8,8 @@ import { attributeDefinitions } from "@/lib/catalog/taxonomy";
 import { localizedPath } from "@/lib/site/paths";
 import { CatalogMedia } from "@/components/catalog-media";
 import { Button } from "@/components/ui/button";
+import { AddToInquiry } from "@/components/add-to-inquiry";
+import { validQuantity } from "@/lib/catalog/inquiry";
 
 const unitNames: Record<string, { en: string; singular: string; zh: string }> = {
   sets: { en: "sets", singular: "set", zh: "套" },
@@ -106,7 +108,7 @@ export function ProductDetailPanel({ product, locale }: { product: Product; loca
           <p className="product-detail-note">{copy.demoNote}</p>
         </section>
 
-        <Button href={localizedPath(locale, "/contact")} className="product-detail-quote">{getDictionary(locale).common.requestQuote}</Button>
+        <div className="product-detail-actions"><AddToInquiry productId={product.id} sku={selected.sku.trim() && validQuantity(selected.moq.quantity) ? selected.sku : undefined} locale={locale} /><Button href={localizedPath(locale, "/contact")} className="product-detail-quote">{getDictionary(locale).common.requestQuote}</Button></div>
         <p className="product-detail-note">{copy.quoteNote}</p>
       </div>
     </div>

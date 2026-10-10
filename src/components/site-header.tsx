@@ -9,6 +9,8 @@ import { Container } from "./ui/container";
 import { LanguageSwitcher } from "./language-switcher";
 import { ProductsMegaMenu } from "./products-mega-menu";
 import { HeaderSearch } from "./header-search";
+import { InquiryHeaderLink } from "./inquiry-header-link";
+import { MobileNavigation } from "./mobile-navigation";
 
 export function SiteHeader({ locale }: { locale: Locale }) {
   const { brand, nav, topBar, search } = getDictionary(locale);
@@ -36,14 +38,15 @@ export function SiteHeader({ locale }: { locale: Locale }) {
         </ProductsMegaMenu>
         {links.map(([path, label]) => <Link key={path} href={localizedPath(locale, `/${path}`)}>{label}</Link>)}
       </nav>
-      <div className="header-actions"><HeaderSearch locale={locale} /><LanguageSwitcher locale={locale} label={nav.language} /><Button href={localizedPath(locale, "/rfq")} className="header-quote">{nav.quote}</Button>
-        <details className="mobile-navigation"><summary aria-label={nav.menu}><span /><span /></summary><nav className="mobile-navigation-panel" aria-label={nav.menu}>
+      <div className="header-actions"><HeaderSearch locale={locale} /><InquiryHeaderLink locale={locale} /><LanguageSwitcher locale={locale} label={nav.language} /><Button href={localizedPath(locale, "/rfq")} className="header-quote">{nav.quote}</Button>
+        <MobileNavigation label={nav.menu}>
           <Link href={localizedPath(locale, "/search")}>{search.action}</Link>
+          <InquiryHeaderLink locale={locale} />
           <Link href={localizedPath(locale, "/products")}>{nav.allProducts}</Link>
           {topCategories.map((category) => <Link className="mobile-category-link" key={category.id} href={localizedPath(locale, `/products/${category.slug}`)}>{category.name[locale]}</Link>)}
           {links.map(([path, label]) => <Link key={path} href={localizedPath(locale, `/${path}`)}>{label}</Link>)}
           <Button href={localizedPath(locale, "/rfq")}>{nav.quote}</Button>
-        </nav></details>
+        </MobileNavigation>
       </div>
     </Container>
   </header>;

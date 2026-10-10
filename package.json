@@ -12,6 +12,7 @@
     "test:search": "node scripts/test-product-search.mjs",
     "test:filter": "node scripts/test-product-filter.mjs",
     "test:sort": "node scripts/test-product-sort.mjs",
+    "test:inquiry": "node scripts/test-inquiry.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

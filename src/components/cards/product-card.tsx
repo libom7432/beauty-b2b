@@ -5,6 +5,8 @@ import { getProductListingSummary } from "@/lib/catalog/products";
 import { localizedPath } from "@/lib/site/paths";
 import { getDictionary } from "@/i18n/dictionaries";
 import { CatalogMedia } from "@/components/catalog-media";
+import { AddToInquiry } from "@/components/add-to-inquiry";
+import { validQuantity } from "@/lib/catalog/inquiry";
 
 const units: Record<string, string> = { sets: "套", packs: "包", boxes: "盒", bottles: "瓶", tubes: "支", units: "件" };
 
@@ -16,6 +18,7 @@ export function ProductCard({ product, locale, listing = false }: { product: Pro
   const href = localizedPath(locale, `/product/${product.slug}`);
   const copy = getDictionary(locale);
   const summary = listing ? getProductListingSummary(product) : undefined;
+  const sku = (summary ? product.variants.find((variant) => variant.id === summary.variantId) : product.variants.find((variant) => variant.sku.trim() && validQuantity(variant.moq.quantity)))?.sku;
   return <article className={`product-card-v3${listing ? " product-card-listing" : ""}`}>
     <Link href={href} aria-label={listing ? `${copy.listing.viewDetails}: ${product.name[locale]}` : product.name[locale]} className="product-card-link">
       <div className="card-media-link"><CatalogMedia visual={product.images[0]?.visual ?? "press-on"} image={product.images[0]} alt={product.images[0]?.alt[locale] ?? ""} /></div>
@@ -32,5 +35,6 @@ export function ProductCard({ product, locale, listing = false }: { product: Pro
         <span className="product-card-view">{copy.listing.viewDetails} <span aria-hidden="true">↗</span></span>
       </>}
     </Link>
+    <AddToInquiry productId={product.id} sku={sku} locale={locale} compact />
   </article>;
 }

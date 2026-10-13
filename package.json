@@ -18,13 +18,17 @@
     "test:rfq-postgres": "node scripts/test-rfq-postgres.mjs",
     "test:catalog-validation": "node --test scripts/test-catalog-validation.mjs",
     "test:catalog-csv": "node --test scripts/test-catalog-csv.mjs",
+    "test:catalog-excel": "node --test scripts/test-catalog-excel.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "exceljs": "^4.4.0",
     "next": "16.3.8",
     "pg": "^8.23.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "saxes": "^6.0.0",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",
@@ -33,6 +37,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/yauzl": "^2.10.3",
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.8",
     "postcss": "8.5.28",

@@ -82,6 +82,10 @@ const schemas: Record<ImportFileName, Record<string, Column>> = {
   },
 };
 export const IMPORT_FILE_NAMES = Object.freeze(Object.keys(schemas) as ImportFileName[]);
+/** Canonical B4.1 columns, shared with the workbook adapter to prevent a second schema. */
+export function getImportCsvColumns(file: ImportFileName): readonly string[] {
+  return Object.freeze(Object.keys(schemas[file]));
+}
 /** Call before RFC 4180 quoting if untrusted text is ever exported for spreadsheet use. */
 export function safeSpreadsheetText(value: string): string {
   return /^\s*[=+\-@]/.test(value) || /^[\t\r]/.test(value) ? `'${value}` : value;

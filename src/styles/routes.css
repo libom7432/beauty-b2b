@@ -225,6 +225,11 @@
 .rfq-review-content dd { margin: 0; }
 .rfq-review-content p { overflow-wrap: anywhere; font-size: 13px; line-height: 1.7; }
 .rfq-review-requirements { white-space: pre-wrap; }
+.rfq-submit-message { padding: 12px 15px; border: var(--hairline); background: #fbf8f4; font-size: 13px; line-height: 1.6; }
+.rfq-submit-error { border-color: #a74439; color: #8f342a; }
+.rfq-submit-result { max-width: 720px; margin: 0 auto var(--section-space); padding: 32px; border: var(--hairline); background: #fbf8f4; }
+.rfq-submit-result h2 { margin: 0 0 15px; font-family: var(--font-editorial); font-size: clamp(1.7rem, 3vw, 2.3rem); font-weight: 400; }
+.rfq-submit-result p { margin: 0 0 24px; overflow-wrap: anywhere; }
 .rfq-leave-dialog { box-sizing: border-box; width: min(430px, calc(100vw - 36px)); max-width: none; max-height: calc(100dvh - 36px); margin: auto; padding: 28px; overflow: auto; border: var(--hairline); background: var(--color-paper); color: var(--color-ink); box-shadow: 0 20px 50px rgb(30 22 20 / 20%); }
 .rfq-leave-dialog::backdrop { background: rgb(30 22 20 / 48%); }
 .rfq-leave-dialog h2 { margin: 0 0 12px; font-family: var(--font-editorial); font-size: 1.8rem; font-weight: 400; }

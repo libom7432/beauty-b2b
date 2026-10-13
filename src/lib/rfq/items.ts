@@ -6,7 +6,10 @@ function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-export function validateRFQItems(input: unknown, products: readonly Product[]): RFQResult<RFQDraftItem[]> {
+// Normalize client fields without consulting the current catalog. Existing
+// idempotency keys must remain replayable after a product or SKU is retired.
+// A variantless item may omit sku or send an empty string; both become absent.
+export function validateRFQItemStructure(input: unknown): RFQResult<RFQDraftItem[]> {
   if (!Array.isArray(input) || input.length === 0) return { ok: false, errors: [{ field: "items", code: "EMPTY_INQUIRY" }] };
   const errors: RFQValidationError[] = [];
   const items: RFQDraftItem[] = [];
@@ -16,22 +19,34 @@ export function validateRFQItems(input: unknown, products: readonly Product[]): 
     const path = `items[${index}]`;
     const item = record(raw);
     const productId = typeof item?.productId === "string" ? item.productId.trim() : "";
+    const skuPresent = item !== null && Object.hasOwn(item, "sku");
     const sku = typeof item?.sku === "string" ? item.sku.trim() : "";
-    const product = products.find((candidate) => candidate.id === productId);
-    const variant = product?.variants.find((candidate) => candidate.sku === sku);
-    if (!product || (product.variants.length > 0 ? !sku || !variant : !!sku)) {
-      errors.push({ field: `${path}.sku`, code: "INVALID_PRODUCT" });
-    }
+    if (!productId) errors.push({ field: `${path}.productId`, code: "INVALID_PRODUCT" });
+    if (skuPresent && typeof item?.sku !== "string") errors.push({ field: `${path}.sku`, code: "INVALID_FORMAT" });
     if (!validQuantity(item?.quantity)) errors.push({ field: `${path}.quantity`, code: "INVALID_QUANTITY" });
-    if (!product) return;
-    const key = `${product.id}\u0000${sku}`;
+    const key = `${productId}\u0000${sku}`;
     if (seen.has(key)) errors.push({ field: path, code: "DUPLICATE_PRODUCT" });
     seen.add(key);
-    if (validQuantity(item?.quantity) && (product.variants.length === 0 || variant)) {
-      items.push({ productId: product.id, ...(sku ? { sku } : {}), quantity: item.quantity });
+    if (productId && (!skuPresent || typeof item?.sku === "string") && validQuantity(item?.quantity)) {
+      items.push({ productId, ...(sku ? { sku } : {}), quantity: item.quantity });
     }
   });
   return errors.length ? { ok: false, errors } : { ok: true, value: items };
+}
+
+export function validateRFQItems(input: unknown, products: readonly Product[]): RFQResult<RFQDraftItem[]> {
+  const structured = validateRFQItemStructure(input);
+  if (!structured.ok) return structured;
+  const errors: RFQValidationError[] = [];
+  structured.value.forEach((item, index) => {
+    const product = products.find((candidate) => candidate.id === item.productId);
+    const sku = item.sku ?? "";
+    const variant = product?.variants.find((candidate) => candidate.sku === sku);
+    if (!product || (product.variants.length > 0 ? !sku || !variant : !!sku)) {
+      errors.push({ field: `items[${index}].sku`, code: "INVALID_PRODUCT" });
+    }
+  });
+  return errors.length ? { ok: false, errors } : structured;
 }
 
 export function inquiryItemsToRFQDraftItems(inquiryItems: readonly InquiryItem[], products: readonly Product[]): RFQResult<RFQDraftItem[]> {

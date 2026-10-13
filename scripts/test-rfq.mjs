@@ -25,7 +25,7 @@ function load(relativePath) {
 const { mockProducts } = load("src/lib/catalog/mock-products");
 const { validateRFQDraft, RFQ_FIELD_LIMITS } = load("src/lib/rfq/validation");
 const { inquiryItemsToRFQDraftItems, snapshotRFQItems } = load("src/lib/rfq/items");
-const { createInitialRFQFormValues, isRFQFormDirty } = load("src/lib/rfq/form-state");
+const { canonicalRFQDraft, createInitialRFQFormValues, isRFQFormDirty } = load("src/lib/rfq/form-state");
 const product = mockProducts[0];
 const variant = product.variants[0];
 const base = {
@@ -58,6 +58,14 @@ test("optional selections and requirements track dirty state", () => {
   assert.equal(isRFQFormDirty({ ...initial, purchaseTimeline: "planning" }), true);
   assert.equal(isRFQFormDirty({ ...initial, requirements: "Please quote" }), true);
   assert.equal(isRFQFormDirty({ ...initial, customization: [] }), false);
+});
+test("browser draft identity includes contact and ignores item or customization order", () => {
+  const withTwo = { ...base, customization: ["oem", "private_label"], items: [base.items[0],
+    { productId: mockProducts[1].id, sku: mockProducts[1].variants[0].sku, quantity: 200 }] };
+  const reordered = { ...withTwo, customization: [...withTwo.customization].reverse(), items: [...withTwo.items].reverse() };
+  assert.equal(canonicalRFQDraft(withTwo), canonicalRFQDraft(reordered));
+  assert.notEqual(canonicalRFQDraft(withTwo), canonicalRFQDraft({ ...withTwo,
+    contact: { ...withTwo.contact, email: "different@example.invalid" } }));
 });
 test("missing full name", () => expectError(contact({ fullName: " " }), "contact.fullName", "REQUIRED"));
 test("invalid email", () => expectError(contact({ email: "not-an-email" }), "contact.email", "INVALID_EMAIL"));
@@ -132,6 +140,16 @@ test("products without variants can be requested without SKU", () => {
   const snapshot = snapshotRFQItems(result.value.items, [noVariant]);
   assert.equal(snapshot.ok, true);
   assert.equal(snapshot.value[0].selectedVariant, null);
+});
+test("variantless SKU accepts absent or empty text and rejects other types", () => {
+  const noVariant = { ...product, id: "standalone", slug: "standalone", variants: [] };
+  const candidate = { productId: noVariant.id, quantity: 3 };
+  const empty = validateRFQDraft({ ...base, items: [{ ...candidate, sku: "" }] }, [noVariant]);
+  assert.equal(empty.ok, true);
+  assert.deepEqual(empty.value.items, [candidate]);
+  for (const sku of [0, false, null, {}, []]) {
+    expectError({ ...base, items: [{ ...candidate, sku }] }, "items[0].sku", "INVALID_FORMAT", [noVariant]);
+  }
 });
 
 console.log(`RFQ validation: ${passed} passed, 0 failed, 0 skipped`);

@@ -56,3 +56,11 @@ export function restoreInquiryItem(items: readonly InquiryItem[], removal: Inqui
   restored.splice(Math.max(0, Math.min(removal.index, restored.length)), 0, removal.item);
   return restored;
 }
+
+// A successful RFQ only consumes items that still match the submitted cart.
+// A later quantity change or remove-and-add creates a different cart item.
+export function removeSubmittedInquiryItems(items: readonly InquiryItem[], submitted: readonly InquiryItem[]): InquiryItem[] {
+  return items.filter((item) => !submitted.some((saved) =>
+    saved.productId === item.productId && saved.sku === item.sku &&
+    saved.quantity === item.quantity && saved.addedAt === item.addedAt));
+}

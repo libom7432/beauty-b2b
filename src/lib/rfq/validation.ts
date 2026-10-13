@@ -1,6 +1,6 @@
 import type { Product } from "@/lib/catalog/types";
 import { isRFQCountryCode } from "./countries";
-import { validateRFQItems } from "./items";
+import { validateRFQItemStructure, validateRFQItems } from "./items";
 import type { RFQBuyerType, RFQContact, RFQCustomization, RFQDraft, RFQErrorCode, RFQPurchaseTimeline, RFQResult, RFQValidationError } from "./types";
 
 export const RFQ_FIELD_LIMITS = {
@@ -44,7 +44,7 @@ function optionalEnum<T extends string>(value: unknown, field: string, choices: 
   return undefined;
 }
 
-export function validateRFQDraft(input: unknown, products: readonly Product[]): RFQResult<RFQDraft> {
+export function validateRFQDraftStructure(input: unknown): RFQResult<RFQDraft> {
   const errors: RFQValidationError[] = [];
   const draft = record(input);
   const rawContact = record(draft?.contact);
@@ -79,7 +79,7 @@ export function validateRFQDraft(input: unknown, products: readonly Product[]): 
       });
     }
   }
-  const checkedItems = validateRFQItems(draft?.items, products);
+  const checkedItems = validateRFQItemStructure(draft?.items);
   if (!checkedItems.ok) errors.push(...checkedItems.errors);
   if (errors.length) return { ok: false, errors };
 
@@ -89,6 +89,15 @@ export function validateRFQDraft(input: unknown, products: readonly Product[]): 
     ...(customization ? { customization } : {}), ...(purchaseTimeline ? { purchaseTimeline } : {}),
     items: checkedItems.ok ? checkedItems.value : [],
   } };
+}
+
+export function validateRFQDraft(input: unknown, products: readonly Product[]): RFQResult<RFQDraft> {
+  const structured = validateRFQDraftStructure(input);
+  if (!structured.ok) return structured;
+  const checkedItems = validateRFQItems(structured.value.items, products);
+  return checkedItems.ok
+    ? { ok: true, value: { ...structured.value, items: checkedItems.value } }
+    : checkedItems;
 }
 
 // Keep the public code list typed alongside the validation result for UI translation.

@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { expect, test, type Page, type Route } from "@playwright/test";
 
 async function addProduct(page: Page, locale: "en" | "zh" = "en") {
   await page.goto(`${locale === "zh" ? "/zh" : ""}/products/press-on-nails`);
@@ -301,4 +302,333 @@ test("RFQ selects, error rows and requirements sizing remain aligned", async ({ 
   expect(textareaStyle).toEqual({ height: "160px", minHeight: "160px", maxHeight: "360px", resize: "vertical" });
   const noOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
   expect(noOverflow).toBe(true);
+});
+
+async function reviewReadyRFQ(page: Page) {
+  await addProduct(page);
+  await fillValidForm(page);
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+  await expect(page.getByRole("heading", { name: "Review your inquiry" })).toBeVisible();
+}
+
+const receipt = { id: "018f9b55-6350-72ef-8f4a-f0dd1d28b124", rfqNumber: "RFQ-TEST-001",
+  status: "received", createdAt: "2026-10-13T00:00:00.000Z", replayed: false };
+
+type ObservedPost = { phase: "initial" | "submitting" | "explicit-retry" | "edited-draft";
+  key: string; bodyDigest: string; response: number | "network-error" | "pending" };
+
+function observedPost(route: Route, phase: ObservedPost["phase"], response: ObservedPost["response"]): ObservedPost {
+  const request = route.request();
+  expect(request.method()).toBe("POST");
+  const key = request.headers()["idempotency-key"];
+  expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  return { phase, key, bodyDigest: createHash("sha256").update(request.postData() ?? "").digest("hex"), response };
+}
+
+test("mock 201 submits the validated draft and clears only its matching item", async ({ page }) => {
+  const posts: ObservedPost[] = [];
+  await page.route("**/api/rfq", async (route) => {
+    posts.push(observedPost(route, "initial", 201));
+    const request = route.request();
+    expect(request.method()).toBe("POST");
+    expect(request.headers()["content-type"]).toBe("application/json");
+    expect(request.headers()["idempotency-key"]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const body = request.postDataJSON();
+    expect(Object.keys(body).sort()).toEqual(["contact", "customization", "items", "requirements"].sort());
+    expect(body.contact).toMatchObject({ fullName: "Jane Buyer", email: "buyer@example.com", companyName: "Nail Studio Ltd", country: "US" });
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({ productId: expect.any(String), sku: expect.any(String), quantity: expect.any(Number) });
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(receipt) });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-001");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(0)");
+  expect(posts).toHaveLength(1);
+  expect(posts[0].response).toBe(201);
+  const saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem("beauty-b2b-rfq-attempts-v1") ?? "[]"));
+  expect(saved).toHaveLength(1);
+  expect(Object.keys(saved[0]).sort()).toEqual(["digest", "key", "receipt"]);
+  expect(JSON.stringify(saved)).not.toContain("buyer@example.com");
+});
+
+test("mock network loss retries the same UUID and 200 displays the receipt", async ({ page }) => {
+  const posts: ObservedPost[] = [];
+  let phase: ObservedPost["phase"] = "initial";
+  await page.route("**/api/rfq", async (route) => {
+    const response = phase === "initial" ? "network-error" : 200;
+    posts.push(observedPost(route, phase, response));
+    if (response === "network-error") await route.abort("internetdisconnected");
+    else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...receipt, replayed: true }) });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("connection was interrupted");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+  expect(posts).toHaveLength(1);
+  phase = "explicit-retry";
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.locator(".rfq-submit-result")).toContainText("RFQ-TEST-001");
+  await expect(page.locator(".rfq-submit-result")).toContainText("already received");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(0)");
+  expect(posts.map(({ phase, response }) => ({ phase, response }))).toEqual([
+    { phase: "initial", response: "network-error" }, { phase: "explicit-retry", response: 200 },
+  ]);
+  expect(posts[1].key).toBe(posts[0].key);
+  expect(posts[1].bodyDigest).toBe(posts[0].bodyDigest);
+});
+
+test("mock 409 never rotates automatically, but an edited draft gets a new UUID", async ({ page }) => {
+  const posts: ObservedPost[] = [];
+  let phase: ObservedPost["phase"] = "initial";
+  await page.route("**/api/rfq", async (route) => {
+    const status = phase === "initial" ? 409 : 201;
+    posts.push(observedPost(route, phase, status));
+    await route.fulfill({ status, contentType: "application/json",
+      body: JSON.stringify(status === 409 ? { error: "IDEMPOTENCY_CONFLICT" } : receipt) });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("different information");
+  await expect(page.getByRole("button", { name: "Try again" })).toBeDisabled();
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+  expect(posts).toHaveLength(1);
+  expect(posts[0].response).toBe(409);
+  await page.getByRole("button", { name: "Edit Information" }).click();
+  await page.locator("#rfq-requirements").fill("Please quote this changed product request for our next store launch.");
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+  phase = "edited-draft";
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-001");
+  expect(posts.map(({ phase, response }) => ({ phase, response }))).toEqual([
+    { phase: "initial", response: 409 }, { phase: "edited-draft", response: 201 },
+  ]);
+  expect(posts[0].key).not.toBe(posts[1].key);
+  expect(posts[0].bodyDigest).not.toBe(posts[1].bodyDigest);
+});
+
+for (const [status, error, message] of [
+  [400, "INVALID_IDEMPOTENCY_KEY", "could not be accepted"],
+  [403, "FORBIDDEN", "current address"],
+  [413, "BODY_TOO_LARGE", "too large"],
+  [415, "UNSUPPORTED_MEDIA_TYPE", "format was rejected"],
+  [429, "RATE_LIMITED", "Too many requests"],
+  [503, "RFQ_UNAVAILABLE", "currently unavailable"],
+] as const) {
+  test(`mock ${status} keeps the form and inquiry cart`, async ({ page }) => {
+    await page.route("**/api/rfq", (route) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify({ error }) }));
+    await reviewReadyRFQ(page);
+    await page.getByRole("button", { name: "Submit RFQ" }).click();
+    await expect(page.locator(".rfq-submit-error")).toContainText(message);
+    await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+    await page.getByRole("button", { name: "Edit Information" }).click();
+    await expect(page.locator("#rfq-full-name")).toHaveValue("Jane Buyer");
+  });
+}
+
+test("mock 422 shows a field error and retains the cart", async ({ page }) => {
+  await page.route("**/api/rfq", (route) => route.fulfill({ status: 422, contentType: "application/json",
+    body: JSON.stringify({ error: "VALIDATION_FAILED", fields: [{ field: "contact.email", code: "INVALID_EMAIL" }] }) }));
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("correct the indicated fields");
+  await expect(page.locator("#rfq-email-error")).toContainText("Invalid email");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+});
+
+test("invalid JSON and unexpected HTTP response retain the same attempt", async ({ page }) => {
+  const keys: string[] = [];
+  await page.route("**/api/rfq", async (route) => {
+    keys.push(route.request().headers()["idempotency-key"]);
+    await route.fulfill({ status: keys.length === 1 ? 201 : 502, contentType: "text/plain", body: "internal text" });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("could not confirm");
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("could not confirm");
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+});
+
+test("double click sends once and a newly added item survives success", async ({ page, context }) => {
+  const posts: ObservedPost[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/rfq", async (route) => {
+    const post = observedPost(route, "submitting", "pending");
+    posts.push(post);
+    await gate;
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(receipt) });
+    post.response = 201;
+  });
+  await reviewReadyRFQ(page);
+  const action = page.getByRole("button", { name: "Submit RFQ" });
+  await action.dblclick();
+  await expect(action).toBeDisabled();
+  await expect(page.getByRole("status")).toContainText("Submitting your RFQ");
+  expect(posts).toHaveLength(1);
+  expect(posts[0].response).toBe("pending");
+  const second = await context.newPage();
+  await second.goto("/products/press-on-nails");
+  await second.locator(".product-card-listing").nth(1).getByRole("button", { name: /Add to Inquiry/ }).click();
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(2)");
+  release();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-001");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+  expect(posts).toHaveLength(1);
+  expect(posts[0].response).toBe(201);
+  await second.close();
+});
+
+test("quantity changed in another tab during submission is retained", async ({ page, context }) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/rfq", async (route) => {
+    await gate;
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(receipt) });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("Submitting your RFQ");
+  const second = await context.newPage();
+  await second.goto("/inquiry");
+  await second.locator(".inquiry-row input[type=number]").fill("375");
+  await second.locator(".inquiry-row input[type=number]").blur();
+  await expect(second.locator(".inquiry-row input[type=number]")).toHaveValue("375");
+  release();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-001");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+  await second.close();
+});
+
+test("refresh restores the UUID after an unknown network result", async ({ page }) => {
+  const keys: string[] = [];
+  await page.route("**/api/rfq", async (route) => {
+    keys.push(route.request().headers()["idempotency-key"]);
+    if (keys.length === 1) await route.abort("internetdisconnected");
+    else await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...receipt, replayed: true }) });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("connection was interrupted");
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.reload();
+  await fillValidForm(page);
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("already received");
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBe(keys[1]);
+});
+
+test("same content after a successful receipt does not send another request", async ({ page }) => {
+  let calls = 0;
+  await page.route("**/api/rfq", async (route) => {
+    calls++;
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(receipt) });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-001");
+  await page.goto("/products/press-on-nails");
+  await page.locator(".product-card-listing").first().getByRole("button", { name: /Add to Inquiry/ }).click();
+  await page.goto("/inquiry/request-quote");
+  await fillValidForm(page);
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-001");
+  expect(calls).toBe(1);
+});
+
+test("explicit new RFQ gives the same content a new UUID", async ({ page }) => {
+  const keys: string[] = [];
+  await page.route("**/api/rfq", async (route) => {
+    keys.push(route.request().headers()["idempotency-key"]);
+    await route.fulfill({ status: 201, contentType: "application/json",
+      body: JSON.stringify({ ...receipt, rfqNumber: `RFQ-TEST-00${keys.length}` }) });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-001");
+  await page.getByRole("button", { name: "Start a new RFQ" }).click();
+  await page.goto("/products/press-on-nails");
+  await page.locator(".product-card-listing").first().getByRole("button", { name: /Add to Inquiry/ }).click();
+  await page.goto("/inquiry/request-quote");
+  await fillValidForm(page);
+  await page.getByRole("button", { name: "Review Inquiry" }).click();
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-002");
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).not.toBe(keys[1]);
+});
+
+test("Chinese 503 feedback preserves the inquiry", async ({ page }) => {
+  await page.route("**/api/rfq", (route) => route.fulfill({ status: 503, contentType: "application/json",
+    body: JSON.stringify({ error: "RFQ_UNAVAILABLE" }) }));
+  await addProduct(page, "zh");
+  await fillValidForm(page, "zh");
+  await page.getByRole("button", { name: "预览询盘" }).click();
+  await page.getByRole("button", { name: "提交询盘" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("当前无法提交询盘");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+});
+
+test("mock timeout keeps the UUID and cart for a safe retry", async ({ page }) => {
+  test.setTimeout(45_000);
+  const posts: ObservedPost[] = [];
+  let phase: ObservedPost["phase"] = "initial";
+  await page.route("**/api/rfq", async (route) => {
+    const post = observedPost(route, phase, phase === "initial" ? "pending" : 200);
+    posts.push(post);
+    if (phase === "explicit-retry") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...receipt, replayed: true }) });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 13_000));
+    await route.abort("timedout").catch(() => {});
+    post.response = "network-error";
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("timed out", { timeout: 20_000 });
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+  const saved = await page.evaluate(() => JSON.parse(sessionStorage.getItem("beauty-b2b-rfq-attempts-v1") ?? "[]"));
+  expect(saved).toHaveLength(1);
+  expect(saved[0].receipt).toBeUndefined();
+  expect(posts).toHaveLength(1);
+  expect(posts[0].phase).toBe("initial");
+  phase = "explicit-retry";
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.locator(".rfq-submit-result")).toContainText("RFQ-TEST-001");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(0)");
+  expect(posts).toHaveLength(2);
+  expect(posts[1].phase).toBe("explicit-retry");
+  expect(posts[1].response).toBe(200);
+  expect(posts[1].key).toBe(posts[0].key);
+  expect(posts[1].bodyDigest).toBe(posts[0].bodyDigest);
+});
+
+test("default-closed API returns a friendly 503 without a database", async ({ page }) => {
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.locator(".rfq-submit-error")).toContainText("currently unavailable");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(1)");
+});
+
+test("mobile RFQ mock submission shows a readable receipt without overflow", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile-chrome", "Mobile layout test");
+  const posts: ObservedPost[] = [];
+  await page.route("**/api/rfq", (route) => {
+    posts.push(observedPost(route, "initial", 201));
+    return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(receipt) });
+  });
+  await reviewReadyRFQ(page);
+  await page.getByRole("button", { name: "Submit RFQ" }).click();
+  await expect(page.getByRole("status")).toContainText("RFQ-TEST-001");
+  await expect(page.locator(".inquiry-header-link").first()).toContainText("(0)");
+  expect(posts).toHaveLength(1);
+  expect(posts[0].response).toBe(201);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

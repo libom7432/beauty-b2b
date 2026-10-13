@@ -14,10 +14,13 @@
     "test:sort": "node scripts/test-product-sort.mjs",
     "test:inquiry": "node scripts/test-inquiry.mjs",
     "test:rfq": "node scripts/test-rfq.mjs",
+    "test:rfq-api": "node scripts/test-rfq-api.mjs",
+    "test:rfq-postgres": "node scripts/test-rfq-postgres.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
     "next": "16.3.8",
+    "pg": "^8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
@@ -25,6 +28,7 @@
     "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "26.6.4",
+    "@types/pg": "^8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "eslint": "9.39.5",

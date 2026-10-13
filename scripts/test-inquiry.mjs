@@ -16,7 +16,7 @@ function load(relativePath) {
 }
 
 const { mockProducts } = load("src/lib/catalog/mock-products.ts");
-const { addInquiryItem, readInquiry, removeInquiryItem, restoreInquiryItem, updateInquiryQuantity, validQuantity } = load("src/lib/catalog/inquiry.ts");
+const { addInquiryItem, readInquiry, removeInquiryItem, removeSubmittedInquiryItems, restoreInquiryItem, updateInquiryQuantity, validQuantity } = load("src/lib/catalog/inquiry.ts");
 const product = mockProducts[0];
 const [first, second] = product.variants;
 const date = "2026-10-10T00:00:00.000Z";
@@ -49,4 +49,7 @@ const undoBoth = restoreInquiryItem(undoSecond, removedFirst.removed);
 assert.deepEqual(undoBoth, two, "reverse order undo restores both items, quantities, timestamps and positions");
 assert.equal(restoreInquiryItem(undoBoth, removedFirst.removed).length, 2, "undo never duplicates an existing SKU");
 assert.deepEqual(removeInquiryItem(two, "UNKNOWN").items, two, "unknown SKU cannot remove another item");
-console.log("Inquiry model: 21 passed, 0 failed, 0 skipped");
+assert.deepEqual(removeSubmittedInquiryItems(two, [two[0]]), [two[1]], "only a submitted matching item is removed");
+assert.deepEqual(removeSubmittedInquiryItems([{ ...two[0], quantity: 300 }, two[1]], [two[0]]), [{ ...two[0], quantity: 300 }, two[1]], "changed quantity survives a successful submission");
+assert.deepEqual(removeSubmittedInquiryItems([{ ...two[0], addedAt: "2026-10-11T00:00:00.000Z" }, two[1]], [two[0]]), [{ ...two[0], addedAt: "2026-10-11T00:00:00.000Z" }, two[1]], "re-added item survives a successful submission");
+console.log("Inquiry model: 24 passed, 0 failed, 0 skipped");

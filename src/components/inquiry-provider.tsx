@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useSyncExternalStore, type ReactNode } from "react";
 import { products } from "@/lib/catalog/products";
-import { addInquiryItem, readInquiry, removeInquiryItem, restoreInquiryItem, updateInquiryQuantity, type InquiryItem, type InquiryRemoval } from "@/lib/catalog/inquiry";
+import { addInquiryItem, readInquiry, removeInquiryItem, removeSubmittedInquiryItems, restoreInquiryItem, updateInquiryQuantity, type InquiryItem, type InquiryRemoval } from "@/lib/catalog/inquiry";
 
 const STORAGE_KEY = "beauty-b2b-inquiry-v1";
 type InquirySnapshot = { items: InquiryItem[]; invalidItemCount: number; ready: boolean };
@@ -53,6 +53,7 @@ type InquiryContextValue = {
   restoreItem: (removal: InquiryRemoval) => void;
   updateQuantity: (sku: string, quantity: number) => void;
   clearInquiry: () => void;
+  removeSubmittedItems: (submitted: readonly InquiryItem[]) => void;
   discardInvalidItems: () => void;
   hasItem: (sku: string) => boolean;
 };
@@ -72,6 +73,15 @@ export function InquiryProvider({ children }: { children: ReactNode }) {
     restoreItem: (removal) => updateItems(restoreInquiryItem(getSnapshot().items, removal)),
     updateQuantity: (sku, quantity) => updateItems(updateInquiryQuantity(getSnapshot().items, sku, quantity)),
     clearInquiry: () => updateItems([]),
+    removeSubmittedItems: (submitted) => {
+      // Re-read the latest browser value before applying the submitted snapshot.
+      let current = getSnapshot().items;
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored !== null) current = readInquiry(stored, products);
+      } catch { /* Use memory if storage is unavailable. */ }
+      updateItems(removeSubmittedInquiryItems(current, submitted));
+    },
     discardInvalidItems: () => updateItems(getSnapshot().items),
     hasItem: (sku) => items.some((item) => item.sku === sku),
   };

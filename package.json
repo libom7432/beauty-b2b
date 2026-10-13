@@ -16,6 +16,7 @@
     "test:rfq": "node scripts/test-rfq.mjs",
     "test:rfq-api": "node scripts/test-rfq-api.mjs",
     "test:rfq-postgres": "node scripts/test-rfq-postgres.mjs",
+    "test:catalog-validation": "node --test scripts/test-catalog-validation.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

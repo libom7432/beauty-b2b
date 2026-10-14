@@ -21,6 +21,7 @@
     "test:catalog-excel": "node --test scripts/test-catalog-excel.mjs",
     "test:catalog-snapshot": "node --test scripts/test-catalog-snapshot.mjs",
     "test:catalog-merge": "node --test scripts/test-catalog-merge.mjs",
+    "test:catalog-dry-run": "node --test scripts/test-catalog-dry-run.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

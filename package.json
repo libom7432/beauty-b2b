@@ -22,6 +22,7 @@
     "test:catalog-snapshot": "node --test scripts/test-catalog-snapshot.mjs",
     "test:catalog-merge": "node --test scripts/test-catalog-merge.mjs",
     "test:catalog-dry-run": "node --test scripts/test-catalog-dry-run.mjs",
+    "test:catalog-transaction": "node --test scripts/test-catalog-transaction.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

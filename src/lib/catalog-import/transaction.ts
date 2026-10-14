@@ -13,6 +13,10 @@ declare const verifiedActor: unique symbol;
 export type ActorContext = Readonly<{ actor_id: string; role: "catalog_admin" | "catalog_import"; [verifiedActor]: true }>;
 export type CatalogActorVerifier = (session: unknown) => Promise<{ actor_id: string; role: ActorContext["role"] } | null>;
 const verifiedActors = new WeakSet<object>();
+/** Checks the in-process server-verifier brand; role strings supplied by a client are insufficient. */
+export function assertVerifiedCatalogActor(actor: unknown): asserts actor is ActorContext {
+  if (!actor || typeof actor !== "object" || !verifiedActors.has(actor)) throw new CatalogImportError("PERMISSION_DENIED");
+}
 /** Server-only boundary: the verifier must authenticate the session and resolve its role. */
 export async function verifyCatalogActorContext(session: unknown, verifier: CatalogActorVerifier): Promise<ActorContext> {
   if (typeof verifier !== "function") throw new CatalogImportError("PERMISSION_DENIED");
@@ -41,7 +45,7 @@ export interface CatalogImportTransaction {
 export type MockFailureStage = "products" | "variants" | "translations" | "product_categories" | "images" | "before_commit" | "idempotency_receipt";
 export type MockTransactionOptions = { fail_at?: MockFailureStage; hold_lock?: () => Promise<void>; timeout_ms?: number };
 export class CatalogImportError extends Error {
-  readonly code: "PERMISSION_DENIED" | "INVALID_REQUEST" | "IDEMPOTENCY_CONFLICT" | "SNAPSHOT_STALE" | "BATCH_INVALID" | "TRANSACTION_TIMEOUT" | "WRITE_FAILED";
+  readonly code: "PERMISSION_DENIED" | "INVALID_REQUEST" | "IDEMPOTENCY_CONFLICT" | "SNAPSHOT_STALE" | "BATCH_INVALID" | "TRANSACTION_TIMEOUT" | "COMMIT_UNKNOWN" | "WRITE_FAILED";
   constructor(code: CatalogImportError["code"], message: string = code) {
     super(message); this.name = "CatalogImportError"; this.code = code;
   }
@@ -62,7 +66,7 @@ function canonical(value: unknown): string {
     ? Object.fromEntries(Object.entries(part).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, walk(value)])) : part;
   return JSON.stringify(walk(value));
 }
-function fingerprint(request: TransactionalImportRequest): string {
+export function catalogImportRequestFingerprint(request: TransactionalImportRequest): string {
   // The grouped `products` projection is redundant and must not be trusted.
   const conversion = "csvFiles" in request.normalized_batch ? request.normalized_batch : null;
   const parsed = conversion?.parsed ?? (conversion ? null : request.normalized_batch as ImportParseResult);
@@ -169,7 +173,7 @@ export class MockCatalogDatabaseAdapter implements CatalogSnapshotReader, Catalo
   async readRows(): Promise<CatalogSnapshotRows> { return copy(this.rows); }
   async readSnapshot(): Promise<CatalogSnapshot> { return readCatalogSnapshot(this, this.templateVersion); }
   async execute(request: TransactionalImportRequest): Promise<DatabaseWriteResult> {
-    if (!request.actor_context || !verifiedActors.has(request.actor_context)) throw new CatalogImportError("PERMISSION_DENIED");
+    assertVerifiedCatalogActor(request.actor_context);
     if (!request.import_batch_id?.trim() || !request.idempotency_key?.trim() || !request.normalized_batch || !["csv", "excel"].includes(request.import_source)) throw new CatalogImportError("INVALID_REQUEST");
     assertNoPreviewCatalogIds(request.normalized_batch);
     const requestCopy = copy(request);
@@ -178,7 +182,7 @@ export class MockCatalogDatabaseAdapter implements CatalogSnapshotReader, Catalo
     const parsed = conversion?.parsed ?? (conversion ? null : requestCopy.normalized_batch as ImportParseResult);
     if (!parsed || !parsed.valid || conversion && (!conversion.valid || conversion.issues.some((issue) => issue.severity === "error")))
       throw new CatalogImportError("BATCH_INVALID");
-    const fingerprintValue = fingerprint(requestCopy);
+    const fingerprintValue = catalogImportRequestFingerprint(requestCopy);
     const receiptKey = `${requestCopy.actor_context.actor_id}\0${requestCopy.idempotency_key}`;
     let release!: () => void;
     const prior = this.gate;

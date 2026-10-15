@@ -45,7 +45,7 @@ export interface CatalogImportTransaction {
 export type MockFailureStage = "products" | "variants" | "translations" | "product_categories" | "images" | "before_commit" | "idempotency_receipt";
 export type MockTransactionOptions = { fail_at?: MockFailureStage; hold_lock?: () => Promise<void>; timeout_ms?: number };
 export class CatalogImportError extends Error {
-  readonly code: "PERMISSION_DENIED" | "INVALID_REQUEST" | "IDEMPOTENCY_CONFLICT" | "SNAPSHOT_STALE" | "BATCH_INVALID" | "TRANSACTION_TIMEOUT" | "COMMIT_UNKNOWN" | "WRITE_FAILED";
+  readonly code: "PERMISSION_DENIED" | "INVALID_REQUEST" | "IDEMPOTENCY_CONFLICT" | "IDEMPOTENCY_KEY_EXPIRED" | "RECEIPT_ACCESS_UNAVAILABLE" | "SNAPSHOT_STALE" | "BATCH_INVALID" | "TRANSACTION_TIMEOUT" | "COMMIT_UNKNOWN" | "WRITE_FAILED";
   constructor(code: CatalogImportError["code"], message: string = code) {
     super(message); this.name = "CatalogImportError"; this.code = code;
   }

@@ -1,17 +1,22 @@
 /** Local-isolated PostgreSQL catalog adapter. No public route or production connection path. */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import pg, { type PoolClient } from "pg";
 import { assertNoPreviewCatalogIds, mergeCatalogImport, type FinalCatalogProduct } from "./merge.ts";
 import { captureTrustedCatalogSnapshot, type CatalogSnapshot, type CatalogSnapshotRows } from "./snapshot.ts";
 import { compareCatalogSnapshotVersion } from "./dry-run.ts";
+import { catalogReceiptPayload, replayCatalogReceipt, type DatabaseReceiptRow } from "./receipt.ts";
+import { restrictedCatalogReceiptLookup } from "./receipt-access.ts";
 import { assertVerifiedCatalogActor, catalogImportRequestFingerprint, CatalogImportError, mapCatalogDatabaseRows,
-  type CatalogImportTransaction, type CatalogSnapshotReader, type DatabaseIdentity, type DatabaseWriteResult,
+  type ActorContext, type CatalogImportTransaction, type CatalogSnapshotReader, type DatabaseIdentity, type DatabaseWriteResult,
   type PreviewIdentity, type TransactionalImportRequest } from "./transaction.ts";
 import type { ImportParseResult } from "./csv.ts";
 
 type Table = keyof CatalogSnapshotRows;
 export type LocalCatalogPostgresConfig = Readonly<{ connection_string: string; data_directory: string; template_version: string;
-  lock_timeout_ms?: number; statement_timeout_ms?: number; transaction_timeout_ms?: number }>;
+  lock_timeout_ms?: number; statement_timeout_ms?: number; transaction_timeout_ms?: number;
+  /** Defaults to restricted_v1. legacy_direct is explicit and only for the older local test cluster. */
+  receipt_access_mode?: "legacy_direct" | "restricted_v1" }>;
+type ReceiptAccessMode = NonNullable<LocalCatalogPostgresConfig["receipt_access_mode"]>;
 const tableNames: Record<Table, string> = { products: "products", variants: "product_variants", categories: "categories",
   product_categories: "product_categories", images: "product_images", translations: "product_translations" };
 const columns: Record<Table, string> = {
@@ -26,9 +31,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PREVIEW = /^preview:(product|variant|image):[a-f0-9]{64}$/;
 const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{1,200}$/;
 const CATALOG_LOCK = "725604510131";
-// Pinned to the B4.5-B1 synthetic-only Postgres.app cluster. This module is not a production connector.
-const VERIFIED_DATA_DIRECTORY = "/Users/mima0000/Documents/Codex/2026-10-13/sprint-2-5-a-beauty-b2b/work/catalog-postgres-b1-55439/data";
-const VERIFIED_SYSTEM_IDENTIFIER = "7696341689079925702";
+// Fixed local targets only. The D2-B2 cluster ID was independently queried and
+// confirmed by the user; every connection must still verify the actual server.
+const LOCAL_TARGETS = [
+  { host: "127.0.0.1", port: "55439", database: "catalog_import_test", user: "catalog_test_owner",
+    data_directory_sha256: "88f779e257370a68b490b72a8aba184200b8574bdaed4c05e9657dec5ee11141",
+    system_identifier: "7696341689079925702", server_version_num: 170011 },
+  { host: "127.0.0.1", port: "55440", database: "catalog_receipts_d2b_test", user: "catalog_d2b_owner",
+    data_directory_sha256: "e578f371b4ca035c6d67d7ec8a595d34f6af44c0c37e0d402ff1c8ab76e55b97",
+    system_identifier: "7696419892593432091", server_version_num: 170011 },
+] as const;
+function directoryDigest(path: string): string { return createHash("sha256").update(path, "utf8").digest("hex"); }
 const verifiedClients = new WeakSet<PoolClient>();
 const clientErrorListeners = new WeakMap<PoolClient, (error: Error) => void>();
 function releaseClient(client: PoolClient, discard = false): void {
@@ -49,25 +62,34 @@ export function safeCatalogBigint(value: unknown, field: string): number | null 
     throw new CatalogImportError("INVALID_REQUEST", `Unsafe database integer: ${field}`);
   return Number(parsed);
 }
-function localConfig(config: LocalCatalogPostgresConfig): void {
+function localTarget(config: LocalCatalogPostgresConfig): (typeof LOCAL_TARGETS)[number] {
   if (!config || typeof config.connection_string !== "string" || typeof config.data_directory !== "string" || !config.data_directory.startsWith("/"))
     throw new CatalogImportError("INVALID_REQUEST");
   let url: URL;
   try { url = new URL(config.connection_string); } catch { throw new CatalogImportError("INVALID_REQUEST"); }
-  if (url.protocol !== "postgresql:" || url.hostname !== "127.0.0.1" || url.port !== "55439"
-    || url.pathname !== "/catalog_import_test" || url.username !== "catalog_test_owner" || url.password || url.search || url.hash
-    || config.data_directory !== VERIFIED_DATA_DIRECTORY || !config.template_version?.trim())
+  const target = LOCAL_TARGETS.find((candidate) => url.protocol === "postgresql:" && url.hostname === candidate.host
+    && url.port === candidate.port && url.pathname === `/${candidate.database}` && url.username === candidate.user
+    && !url.password && !url.search && !url.hash
+    && directoryDigest(config.data_directory) === candidate.data_directory_sha256);
+  if (!target || !config.template_version?.trim())
     throw new CatalogImportError("INVALID_REQUEST", "Only the verified local catalog test cluster is allowed");
+  if (!target.system_identifier) throw new CatalogImportError("PERMISSION_DENIED", "New local cluster requires a reviewed physical identifier");
+  return target;
 }
-/** Verifies the server itself; caller-supplied connection strings and data-directory strings are insufficient. */
-export async function verifyLocalCatalogTestConnection(client: Pick<PoolClient, "query">): Promise<void> {
-  const row = (await client.query(`SELECT current_database() db, session_user username, host(inet_server_addr()) host,
+/** Runs before SET LOCAL ROLE; this connection must still execute as its pinned test owner. */
+export async function verifyLocalCatalogTestConnection(client: Pick<PoolClient, "query">,
+  config: LocalCatalogPostgresConfig): Promise<void> {
+  const target = localTarget(config);
+  const row = (await client.query(`SELECT current_database() db, session_user username, current_user execution_user,
+    current_setting('server_version_num')::integer server_version_num, host(inet_server_addr()) host,
     inet_server_port() port, current_setting('data_directory') data_dir, current_setting('listen_addresses') listens,
     (SELECT system_identifier::text FROM pg_control_system()) system_id,
     to_regnamespace('rfq_private') rfq_schema`)).rows[0];
-  if (!row || row.db !== "catalog_import_test" || row.username !== "catalog_test_owner" || row.host !== "127.0.0.1"
-    || row.port !== 55439 || row.listens !== "127.0.0.1" || row.data_dir !== VERIFIED_DATA_DIRECTORY
-    || row.system_id !== VERIFIED_SYSTEM_IDENTIFIER || row.rfq_schema !== null)
+  if (!row || row.db !== target.database || row.username !== target.user || row.execution_user !== target.user
+    || row.server_version_num !== target.server_version_num || row.host !== target.host
+    || row.port !== Number(target.port) || row.listens !== target.host || row.data_dir !== config.data_directory
+    || directoryDigest(row.data_dir) !== target.data_directory_sha256
+    || row.system_id !== target.system_identifier || row.rfq_schema !== null)
     throw new CatalogImportError("PERMISSION_DENIED", "Local catalog database identity mismatch");
 }
 function ms(value: number | undefined, fallback: number): number {
@@ -81,6 +103,28 @@ function dbError(error: unknown): CatalogImportError {
   if (["55P03", "40P01", "40001", "57014", "25P03", "25P04", "57P01"].includes(code ?? "")) return new CatalogImportError("TRANSACTION_TIMEOUT");
   if (code === "23505" || code === "23503" || code === "23514" || code === "P0001") return new CatalogImportError("BATCH_INVALID");
   return new CatalogImportError("WRITE_FAILED");
+}
+/** A missing or inaccessible restricted function is a setup failure, never an invitation to use direct SELECT. */
+export function catalogReceiptLookupError(error: unknown): CatalogImportError {
+  if (["42883", "42501", "3F000", "42P01"].includes((error as { code?: string })?.code ?? ""))
+    return new CatalogImportError("RECEIPT_ACCESS_UNAVAILABLE");
+  return dbError(error);
+}
+export function resolveCatalogReceiptAccessMode(mode?: ReceiptAccessMode): ReceiptAccessMode {
+  if (mode === undefined) return "restricted_v1";
+  if (mode !== "restricted_v1" && mode !== "legacy_direct") throw new CatalogImportError("INVALID_REQUEST");
+  return mode;
+}
+/** The legacy query can only be reached through an explicit, validated local mode. */
+export function catalogReceiptLookupQuery(mode: ReceiptAccessMode, actor: ActorContext, idempotencyKey: string):
+  Readonly<{ text: string; values: readonly string[] }> {
+  assertVerifiedCatalogActor(actor);
+  if (mode === "restricted_v1") return restrictedCatalogReceiptLookup(actor, idempotencyKey);
+  if (mode !== "legacy_direct") throw new CatalogImportError("INVALID_REQUEST");
+  return { text: `SELECT request_fingerprint,status,result,
+      clock_timestamp() <= retry_until AS within_retry_window
+    FROM catalog_private.catalog_import_receipts
+    WHERE actor_id=$1 AND idempotency_key=$2`, values: [actor.actor_id, idempotencyKey] };
 }
 function identity(input: unknown, kind: "product" | "variant" | "image", allocated: Record<PreviewIdentity, DatabaseIdentity>): string {
   if (typeof input !== "string") throw new CatalogImportError("INVALID_REQUEST");
@@ -119,13 +163,18 @@ export class PostgresCatalogSnapshotReader implements CatalogSnapshotReader {
 /** Owns the pool; each operation verifies the physical database before business SQL. */
 export class PostgresCatalogImportTransaction implements CatalogImportTransaction {
   private readonly config: LocalCatalogPostgresConfig;
+  private readonly receiptAccessMode: ReceiptAccessMode;
   private readonly pool: pg.Pool;
   private readonly lockMs: number;
   private readonly statementMs: number;
   private readonly transactionMs: number;
   constructor(config: LocalCatalogPostgresConfig) {
-    localConfig(config);
+    const target = localTarget(config);
+    const receiptAccessMode = resolveCatalogReceiptAccessMode(config.receipt_access_mode);
+    if (receiptAccessMode === "legacy_direct" && target.port !== "55439")
+      throw new CatalogImportError("INVALID_REQUEST");
     this.config = config;
+    this.receiptAccessMode = receiptAccessMode;
     this.lockMs = ms(config.lock_timeout_ms, 2000);
     this.statementMs = ms(config.statement_timeout_ms, 10000);
     this.transactionMs = ms(config.transaction_timeout_ms, 30000);
@@ -135,7 +184,7 @@ export class PostgresCatalogImportTransaction implements CatalogImportTransactio
   private async checkedClient(): Promise<PoolClient> {
     const client = await this.pool.connect();
     try {
-      await verifyLocalCatalogTestConnection(client);
+      await verifyLocalCatalogTestConnection(client, this.config);
       verifiedClients.add(client);
       const listener = () => { /* query rejection is handled by the transaction; suppress an unhandled fatal socket event */ };
       client.on("error", listener);
@@ -188,12 +237,14 @@ export class PostgresCatalogImportTransaction implements CatalogImportTransactio
       await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [CATALOG_LOCK]);
       for (const table of ["categories", "products", "product_variants", "product_categories", "product_images", "product_translations"])
         await client.query(`LOCK TABLE catalog_private.${table} IN SHARE ROW EXCLUSIVE MODE`);
-      const prior = (await client.query(`SELECT request_fingerprint,result FROM catalog_private.product_import_receipts
-        WHERE actor_id=$1 AND idempotency_key=$2`, [actorId, request.idempotency_key])).rows[0];
+      const receiptQuery = catalogReceiptLookupQuery(this.receiptAccessMode, request.actor_context, request.idempotency_key);
+      let prior: DatabaseReceiptRow | undefined;
+      try { prior = (await client.query(receiptQuery.text, [...receiptQuery.values])).rows[0] as DatabaseReceiptRow | undefined; }
+      catch (error) { throw this.receiptAccessMode === "restricted_v1" ? catalogReceiptLookupError(error) : dbError(error); }
       if (prior) {
-        if (prior.request_fingerprint !== fingerprint) throw new CatalogImportError("IDEMPOTENCY_CONFLICT");
+        const replay = replayCatalogReceipt(prior, fingerprint);
         await client.query("COMMIT");
-        return { ...prior.result as DatabaseWriteResult, replayed: true };
+        return replay;
       }
       const reader = new PostgresCatalogSnapshotReader(client);
       const snapshot = await reader.readSnapshot(this.config.template_version);
@@ -207,9 +258,12 @@ export class PostgresCatalogImportTransaction implements CatalogImportTransactio
         import_batch_id: request.import_batch_id, snapshot_version: final.version,
         product_count: merged.outcome === "unchanged" ? 0 : merged.products.length, identity_map: identities, replayed: false };
       assertNoPreviewCatalogIds(result.identity_map);
-      await client.query(`INSERT INTO catalog_private.product_import_receipts
-        (actor_id,idempotency_key,request_fingerprint,status,result,completed_at)
-        VALUES ($1,$2,$3,'committed',$4::jsonb,now())`, [actorId, request.idempotency_key, fingerprint, sqlJson(result)]);
+      await client.query(`WITH stamp AS (SELECT clock_timestamp() AS completed_at)
+        INSERT INTO catalog_private.catalog_import_receipts
+          (actor_id,idempotency_key,request_fingerprint,status,result,completed_at,retry_until,result_purge_after)
+        SELECT $1,$2,$3,'committed',$4::jsonb,stamp.completed_at,
+          stamp.completed_at + interval '30 days',stamp.completed_at + interval '90 days'
+        FROM stamp`, [actorId, request.idempotency_key, fingerprint, sqlJson(catalogReceiptPayload(result))]);
       writeCommitAttempted = true;
       await client.query("COMMIT");
       return result;

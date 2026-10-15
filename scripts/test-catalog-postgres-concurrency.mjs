@@ -10,20 +10,33 @@ const url = process.env.CATALOG_IMPORT_TEST_DATABASE_URL;
 const dataDir = process.env.CATALOG_IMPORT_TEST_DATA_DIR;
 if (process.env.CATALOG_IMPORT_TEST_ENABLE !== "1" || !url || !dataDir) throw new Error("Explicit isolated catalog import test opt-in required");
 const target = new URL(url);
-if (target.protocol !== "postgresql:" || target.hostname !== "127.0.0.1" || target.port !== "55439"
-  || target.pathname !== "/catalog_import_test" || target.username !== "catalog_test_owner" || target.password)
+if (target.protocol !== "postgresql:" || target.hostname !== "127.0.0.1" || target.port !== "55440"
+  || target.pathname !== "/catalog_receipts_d2b_test" || target.username !== "catalog_d2b_owner"
+  || target.password || target.search || target.hash)
   throw new Error("Refusing non-isolated test target");
-const config = { connection_string: url, data_directory: dataDir, template_version: "catalog-attributes-v1", lock_timeout_ms: 500, statement_timeout_ms: 5000 };
+const config = { connection_string: url, data_directory: dataDir, template_version: "catalog-attributes-v1", receipt_access_mode: "restricted_v1", lock_timeout_ms: 500, statement_timeout_ms: 5000 };
 const owner = new pg.Client({ connectionString: url });
 await owner.connect();
-await verifyLocalCatalogTestConnection(owner);
+await verifyLocalCatalogTestConnection(owner, config);
 const row = (await owner.query(`SELECT current_database() db, session_user username, host(inet_server_addr()) host,
   inet_server_port() port, current_setting('data_directory') data_dir, current_setting('listen_addresses') listens,
   to_regnamespace('rfq_private') rfq_schema`)).rows[0];
 console.log(`LOCAL PREFLIGHT host=${row.host} port=${row.port} database=${row.db} user=${row.username} data_dir=${row.data_dir} listens=${row.listens}`);
-if (row.db !== "catalog_import_test" || row.username !== "catalog_test_owner" || row.host !== "127.0.0.1"
-  || row.port !== 55439 || row.listens !== "127.0.0.1" || fs.realpathSync(row.data_dir) !== fs.realpathSync(dataDir) || row.rfq_schema !== null)
+if (row.db !== "catalog_receipts_d2b_test" || row.username !== "catalog_d2b_owner" || row.host !== "127.0.0.1"
+  || row.port !== 55440 || row.listens !== "127.0.0.1" || fs.realpathSync(row.data_dir) !== fs.realpathSync(dataDir) || row.rfq_schema !== null)
   throw new Error("Isolated local database identity mismatch");
+if ((await owner.query("SELECT to_regclass('catalog_private.catalog_import_receipts')::text AS receipt_table")).rows[0]?.receipt_table
+  !== "catalog_private.catalog_import_receipts") {
+  await owner.end();
+  throw new Error("D2-B fresh isolated receipt fixture is required; no database cleanup or migration was executed");
+}
+const receiptAccess = (await owner.query(`SELECT
+  to_regprocedure('catalog_private.lookup_catalog_import_receipt(text,text)')::text AS lookup_function,
+  has_any_column_privilege('catalog_import','catalog_private.catalog_import_receipts','SELECT') AS import_direct_select,
+  has_any_column_privilege('catalog_admin','catalog_private.catalog_import_receipts','SELECT') AS admin_direct_select`)).rows[0];
+if (receiptAccess.lookup_function !== "catalog_private.lookup_catalog_import_receipt(text,text)"
+  || receiptAccess.import_direct_select !== false || receiptAccess.admin_direct_select !== false)
+  throw new Error("Restricted receipt access migration is required before isolated concurrency tests");
 
 const HEAD = {
   "products.csv": ["operation", "product_code", "slug", "product_type", "status", "oem", "odm", "attributes"],
@@ -50,8 +63,8 @@ const sku = (code, key, status = "draft") => ({ operation: "create", product_cod
 const errorCode = (expected) => (error) => { assert.equal(error?.code, expected); return true; };
 const adapter = new PostgresCatalogImportTransaction(config);
 const reset = async (client = owner) => {
-  await verifyLocalCatalogTestConnection(client);
-  return client.query(`TRUNCATE catalog_private.product_import_receipts,
+  await verifyLocalCatalogTestConnection(client, config);
+  return client.query(`TRUNCATE catalog_private.catalog_import_receipts,
     catalog_private.product_images,catalog_private.product_translations,catalog_private.product_categories,
     catalog_private.product_variants,catalog_private.products,catalog_private.categories`);
 };
@@ -66,22 +79,22 @@ const publishedRecords = (code, categoryId) => ({
 });
 const syntheticCategory = async (slug) => (await owner.query(`INSERT INTO catalog_private.categories(slug,status,name_en,name_zh)
   VALUES ($1,'published','Nails','美甲') RETURNING id`, [slug])).rows[0].id;
-const failureTables = new Set(["products", "product_variants", "product_translations", "product_categories", "product_images", "product_import_receipts"]);
+const failureTables = new Set(["products", "product_variants", "product_translations", "product_categories", "product_images", "catalog_import_receipts"]);
 const failureBodies = { raise: "RAISE EXCEPTION 'synthetic failure';", duplicate_sku: "NEW.sku := 'SYN-EXISTING-SKU';", sleep: "PERFORM pg_sleep(1);" };
 async function withFailTrigger(table, mode) {
   if (!failureTables.has(table) || !Object.hasOwn(failureBodies, mode)) throw new Error("Invalid local failure fixture");
-  await owner.query(`CREATE OR REPLACE FUNCTION catalog_private.catalog_import_test_failure() RETURNS trigger
+  await owner.query(`CREATE OR REPLACE FUNCTION catalog_private.catalog_receipts_d2b_test_failure() RETURNS trigger
     LANGUAGE plpgsql AS $$ BEGIN ${failureBodies[mode]} RETURN NEW; END $$`);
-  await owner.query(`CREATE TRIGGER catalog_import_test_failure BEFORE INSERT OR UPDATE ON catalog_private.${table}
-    FOR EACH ROW EXECUTE FUNCTION catalog_private.catalog_import_test_failure()`);
+  await owner.query(`CREATE TRIGGER catalog_receipts_d2b_test_failure BEFORE INSERT OR UPDATE ON catalog_private.${table}
+    FOR EACH ROW EXECUTE FUNCTION catalog_private.catalog_receipts_d2b_test_failure()`);
 }
 async function dropFailTrigger(table) {
   if (!failureTables.has(table)) throw new Error("Invalid local failure fixture");
-  await owner.query(`DROP TRIGGER IF EXISTS catalog_import_test_failure ON catalog_private.${table}`);
-  await owner.query("DROP FUNCTION IF EXISTS catalog_private.catalog_import_test_failure()");
+  await owner.query(`DROP TRIGGER IF EXISTS catalog_receipts_d2b_test_failure ON catalog_private.${table}`);
+  await owner.query("DROP FUNCTION IF EXISTS catalog_private.catalog_receipts_d2b_test_failure()");
 }
 
-const receiptCount = async () => (await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n;
+const receiptCount = async () => (await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n;
 const productCount = async () => (await owner.query("SELECT count(*)::integer n FROM catalog_private.products")).rows[0].n;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function concurrent(first, second, expectedRejection = "SNAPSHOT_STALE") {
@@ -217,7 +230,7 @@ try {
       await reset();
       const holder = new pg.Client({ connectionString: url });
       await holder.connect();
-      await verifyLocalCatalogTestConnection(holder);
+      await verifyLocalCatalogTestConnection(holder, config);
       const before = await adapter.readSnapshot();
       const req = request(before, parse({ "products.csv": [draft("SYN-WAIT")] }, before), "wait-release");
       await holder.query("BEGIN");
@@ -239,7 +252,7 @@ try {
       await reset();
       const holder = new pg.Client({ connectionString: url });
       await holder.connect();
-      await verifyLocalCatalogTestConnection(holder);
+      await verifyLocalCatalogTestConnection(holder, config);
       const before = await adapter.readSnapshot();
       const req = request(before, parse({ "products.csv": [draft("SYN-RETRY-WAIT")] }, before), "retry-wait");
       await holder.query("BEGIN");
@@ -257,7 +270,7 @@ try {
       await reset();
       const holder = new pg.Client({ connectionString: url });
       await holder.connect();
-      await verifyLocalCatalogTestConnection(holder);
+      await verifyLocalCatalogTestConnection(holder, config);
       await holder.query("BEGIN");
       await holder.query("SELECT pg_advisory_xact_lock($1::bigint)", ["725604510131"]);
       const before = await adapter.readSnapshot();
@@ -306,7 +319,7 @@ try {
     });
 
     await t.test("failure at each write stage, including receipt, rolls back all changes", async () => {
-      const stages = ["products", "product_variants", "product_translations", "product_categories", "product_images", "product_import_receipts"];
+      const stages = ["products", "product_variants", "product_translations", "product_categories", "product_images", "catalog_import_receipts"];
       for (const [index, stage] of stages.entries()) {
         await reset();
         const categoryId = await syntheticCategory(`b3-failure-${index}`);
@@ -345,7 +358,7 @@ try {
       try {
         for (let i = 0; i < 40 && !backendPid; i++) {
           const active = (await owner.query(`SELECT pid FROM pg_stat_activity
-            WHERE datname='catalog_import_test' AND pid<>pg_backend_pid()
+            WHERE datname='catalog_receipts_d2b_test' AND pid<>pg_backend_pid()
               AND state='active' AND query LIKE 'INSERT INTO catalog_private.products%'
             ORDER BY pid`)).rows;
           backendPid = active[0]?.pid;

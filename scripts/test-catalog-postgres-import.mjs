@@ -11,20 +11,33 @@ const url = process.env.CATALOG_IMPORT_TEST_DATABASE_URL;
 const dataDir = process.env.CATALOG_IMPORT_TEST_DATA_DIR;
 if (process.env.CATALOG_IMPORT_TEST_ENABLE !== "1" || !url || !dataDir) throw new Error("Explicit isolated catalog import test opt-in required");
 const target = new URL(url);
-if (target.protocol !== "postgresql:" || target.hostname !== "127.0.0.1" || target.port !== "55439"
-  || target.pathname !== "/catalog_import_test" || target.username !== "catalog_test_owner" || target.password)
+if (target.protocol !== "postgresql:" || target.hostname !== "127.0.0.1" || target.port !== "55440"
+  || target.pathname !== "/catalog_receipts_d2b_test" || target.username !== "catalog_d2b_owner"
+  || target.password || target.search || target.hash)
   throw new Error("Refusing non-isolated test target");
-const config = { connection_string: url, data_directory: dataDir, template_version: "catalog-attributes-v1", lock_timeout_ms: 500, statement_timeout_ms: 5000 };
+const config = { connection_string: url, data_directory: dataDir, template_version: "catalog-attributes-v1", receipt_access_mode: "restricted_v1", lock_timeout_ms: 500, statement_timeout_ms: 5000 };
 const owner = new pg.Client({ connectionString: url });
 await owner.connect();
-await verifyLocalCatalogTestConnection(owner);
+await verifyLocalCatalogTestConnection(owner, config);
 const row = (await owner.query(`SELECT current_database() db, session_user username, host(inet_server_addr()) host,
   inet_server_port() port, current_setting('data_directory') data_dir, current_setting('listen_addresses') listens,
   to_regnamespace('rfq_private') rfq_schema`)).rows[0];
 console.log(`LOCAL PREFLIGHT host=${row.host} port=${row.port} database=${row.db} user=${row.username} data_dir=${row.data_dir} listens=${row.listens}`);
-if (row.db !== "catalog_import_test" || row.username !== "catalog_test_owner" || row.host !== "127.0.0.1"
-  || row.port !== 55439 || row.listens !== "127.0.0.1" || fs.realpathSync(row.data_dir) !== fs.realpathSync(dataDir) || row.rfq_schema !== null)
+if (row.db !== "catalog_receipts_d2b_test" || row.username !== "catalog_d2b_owner" || row.host !== "127.0.0.1"
+  || row.port !== 55440 || row.listens !== "127.0.0.1" || fs.realpathSync(row.data_dir) !== fs.realpathSync(dataDir) || row.rfq_schema !== null)
   throw new Error("Isolated local database identity mismatch");
+if ((await owner.query("SELECT to_regclass('catalog_private.catalog_import_receipts')::text AS receipt_table")).rows[0]?.receipt_table
+  !== "catalog_private.catalog_import_receipts") {
+  await owner.end();
+  throw new Error("D2-B fresh isolated receipt fixture is required; no database cleanup or migration was executed");
+}
+const receiptAccess = (await owner.query(`SELECT
+  to_regprocedure('catalog_private.lookup_catalog_import_receipt(text,text)')::text AS lookup_function,
+  has_any_column_privilege('catalog_import','catalog_private.catalog_import_receipts','SELECT') AS import_direct_select,
+  has_any_column_privilege('catalog_admin','catalog_private.catalog_import_receipts','SELECT') AS admin_direct_select`)).rows[0];
+if (receiptAccess.lookup_function !== "catalog_private.lookup_catalog_import_receipt(text,text)"
+  || receiptAccess.import_direct_select !== false || receiptAccess.admin_direct_select !== false)
+  throw new Error("Restricted receipt access migration is required before isolated import tests");
 
 const HEAD = {
   "products.csv": ["operation", "product_code", "slug", "product_type", "status", "oem", "odm", "attributes"],
@@ -51,8 +64,8 @@ const sku = (code, key, status = "draft") => ({ operation: "create", product_cod
 const errorCode = (expected) => (error) => { assert.equal(error?.code, expected); return true; };
 const adapter = new PostgresCatalogImportTransaction(config);
 const reset = async (client = owner) => {
-  await verifyLocalCatalogTestConnection(client);
-  return client.query(`TRUNCATE catalog_private.product_import_receipts,
+  await verifyLocalCatalogTestConnection(client, config);
+  return client.query(`TRUNCATE catalog_private.catalog_import_receipts,
     catalog_private.product_images,catalog_private.product_translations,catalog_private.product_categories,
     catalog_private.product_variants,catalog_private.products,catalog_private.categories`);
 };
@@ -67,31 +80,31 @@ const publishedRecords = (code, categoryId) => ({
 });
 const syntheticCategory = async (slug) => (await owner.query(`INSERT INTO catalog_private.categories(slug,status,name_en,name_zh)
   VALUES ($1,'published','Nails','美甲') RETURNING id`, [slug])).rows[0].id;
-const failureTables = new Set(["products", "product_variants", "product_translations", "product_categories", "product_images", "product_import_receipts"]);
+const failureTables = new Set(["products", "product_variants", "product_translations", "product_categories", "product_images", "catalog_import_receipts"]);
 const failureBodies = { raise: "RAISE EXCEPTION 'synthetic failure';", duplicate_sku: "NEW.sku := 'SYN-EXISTING-SKU';", sleep: "PERFORM pg_sleep(1);" };
 async function withFailTrigger(table, mode) {
   if (!failureTables.has(table) || !Object.hasOwn(failureBodies, mode)) throw new Error("Invalid local failure fixture");
-  await owner.query(`CREATE OR REPLACE FUNCTION catalog_private.catalog_import_test_failure() RETURNS trigger
+  await owner.query(`CREATE OR REPLACE FUNCTION catalog_private.catalog_receipts_d2b_test_failure() RETURNS trigger
     LANGUAGE plpgsql AS $$ BEGIN ${failureBodies[mode]} RETURN NEW; END $$`);
-  await owner.query(`CREATE TRIGGER catalog_import_test_failure BEFORE INSERT OR UPDATE ON catalog_private.${table}
-    FOR EACH ROW EXECUTE FUNCTION catalog_private.catalog_import_test_failure()`);
+  await owner.query(`CREATE TRIGGER catalog_receipts_d2b_test_failure BEFORE INSERT OR UPDATE ON catalog_private.${table}
+    FOR EACH ROW EXECUTE FUNCTION catalog_private.catalog_receipts_d2b_test_failure()`);
 }
 async function dropFailTrigger(table) {
   if (!failureTables.has(table)) throw new Error("Invalid local failure fixture");
-  await owner.query(`DROP TRIGGER IF EXISTS catalog_import_test_failure ON catalog_private.${table}`);
-  await owner.query("DROP FUNCTION IF EXISTS catalog_private.catalog_import_test_failure()");
+  await owner.query(`DROP TRIGGER IF EXISTS catalog_receipts_d2b_test_failure ON catalog_private.${table}`);
+  await owner.query("DROP FUNCTION IF EXISTS catalog_private.catalog_receipts_d2b_test_failure()");
 }
 
 try {
   await test("isolated PostgreSQL transactional catalog import", async (t) => {
     await t.test("identity mismatch and cleanup target mismatch refuse writes", async () => {
-      assert.throws(() => new PostgresCatalogImportTransaction({ ...config, data_directory: "/tmp/catalog-postgres-b1-55439/data" }),
+      assert.throws(() => new PostgresCatalogImportTransaction({ ...config, data_directory: "/tmp/catalog-receipts-d2b-55440/data" }),
         errorCode("INVALID_REQUEST"));
       assert.throws(() => new PostgresCatalogImportTransaction({ ...config,
-        connection_string: "postgresql://catalog_test_owner@127.0.0.1:55439/not_catalog_import_test" }), errorCode("INVALID_REQUEST"));
+        connection_string: "postgresql://catalog_d2b_owner@127.0.0.1:55440/not_catalog_receipts_d2b_test" }), errorCode("INVALID_REQUEST"));
       let queries = 0;
-      const wrong = { query: async () => { queries++; return { rows: [{ db: "catalog_import_test", username: "catalog_test_owner",
-        host: "127.0.0.1", port: 55439, listens: "127.0.0.1", data_dir: dataDir,
+      const wrong = { query: async () => { queries++; return { rows: [{ db: "catalog_receipts_d2b_test", username: "catalog_d2b_owner",
+        host: "127.0.0.1", port: 55440, listens: "127.0.0.1", data_dir: dataDir,
         system_id: "wrong-cluster", rfq_schema: null }] }; } };
       await assert.rejects(reset(wrong), errorCode("PERMISSION_DENIED"));
       assert.equal(queries, 1, "TRUNCATE must not run after identity failure");
@@ -138,7 +151,7 @@ try {
       const noOpResult = await adapter.execute(request(updated, noOp, "noop-a"));
       assert.equal(noOpResult.status, "no_changes");
       assert.deepEqual(noOpResult.identity_map, {});
-      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n, 3);
+      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n, 3);
     });
     await t.test("published create writes bilingual content, category and primary image", async () => {
       await reset();
@@ -181,7 +194,7 @@ try {
         { actor_context: { actor_id: "synthetic-importer", role: "catalog_import" } });
       await assert.rejects(adapter.execute(forged), errorCode("PERMISSION_DENIED"));
       assert.equal((await adapter.readSnapshot()).products.length, 0);
-      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n, 0);
+      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n, 0);
     });
     await t.test("SQL-like translation text is stored as data; receipt tokens reject raw content", async () => {
       await reset();
@@ -194,7 +207,7 @@ try {
       assert.equal(after.translations[0].name, suspicious);
       assert.equal(after.products.length, 1);
       await assert.rejects(adapter.execute(request(after, batch, "bad key; DROP TABLE products")), errorCode("INVALID_REQUEST"));
-      const receipt = (await owner.query("SELECT result::text text FROM catalog_private.product_import_receipts")).rows[0].text;
+      const receipt = (await owner.query("SELECT result::text text FROM catalog_private.catalog_import_receipts")).rows[0].text;
       assert.equal(receipt.includes(suspicious), false);
     });
     await t.test("two connections serialize identical retry and stale distinct request", async () => {
@@ -230,7 +243,7 @@ try {
       try { await assert.rejects(unreliable.execute(req), errorCode("COMMIT_UNKNOWN")); }
       finally { await unreliable.close(); }
       assert.equal((await adapter.readSnapshot()).products.length, 1);
-      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n, 1);
+      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n, 1);
       const replay = await adapter.execute(req);
       assert.equal(replay.replayed, true);
       assert.equal((await adapter.readSnapshot()).products.length, 1);
@@ -263,11 +276,13 @@ try {
         await assert.rejects(adapter.execute(request(before, batch, "unique-conflict")), errorCode("BATCH_INVALID"));
       } finally { await dropFailTrigger("product_variants"); }
       assert.equal((await adapter.readSnapshot()).version.digest, before.version.digest);
-      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n, 1);
+      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n, 1);
     });
-    await t.test("RLS prevents anon and RFQ access to catalog and receipts", async () => {
+    await t.test("RLS prevents anon and any existing RFQ role from catalog and receipt access", async () => {
       await reset();
-      for (const role of ["anon", "rfq_api"]) {
+      const rfqRoleExists = (await owner.query("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='rfq_api') AS exists")).rows[0].exists;
+      if (!rfqRoleExists) console.log("rfq_api absent in isolated catalog cluster; RFQ table-level permissions are not tested");
+      for (const role of rfqRoleExists ? ["anon", "rfq_api"] : ["anon"]) {
         if (role !== "anon" && role !== "rfq_api") throw new Error("Invalid local test role");
         await owner.query("BEGIN");
         try {
@@ -277,7 +292,7 @@ try {
         await owner.query("BEGIN");
         try {
           await owner.query(`SET LOCAL ROLE ${role}`);
-          await assert.rejects(owner.query("SELECT count(*) FROM catalog_private.product_import_receipts"));
+          await assert.rejects(owner.query("SELECT count(*) FROM catalog_private.catalog_import_receipts"));
         } finally { await owner.query("ROLLBACK"); }
       }
     });
@@ -291,10 +306,10 @@ try {
         await assert.rejects(adapter.execute(request(before, batch, "locked")), errorCode("TRANSACTION_TIMEOUT"));
       } finally { await owner.query("ROLLBACK"); }
       assert.equal((await adapter.readSnapshot()).products.length, 0);
-      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n, 0);
+      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n, 0);
     });
     await t.test("each business write stage and receipt failure roll back atomically", async () => {
-      const stages = ["products", "product_variants", "product_translations", "product_categories", "product_images", "product_import_receipts"];
+      const stages = ["products", "product_variants", "product_translations", "product_categories", "product_images", "catalog_import_receipts"];
       for (const [index, stage] of stages.entries()) {
         await reset();
         const categoryId = await syntheticCategory(`failure-category-${index}`);
@@ -306,7 +321,7 @@ try {
         } finally { await dropFailTrigger(stage); }
         const after = await adapter.readSnapshot();
         assert.equal(after.version.digest, before.version.digest, `${stage} changed state after rollback`);
-        assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n, 0);
+        assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n, 0);
       }
     });
     await t.test("failed ROLLBACK discards the connection and leaves no partial data", async () => {
@@ -328,7 +343,7 @@ try {
         assert.equal(unreliable.pool.totalCount, 0, "failed connection must not return to the pool");
       } finally { await unreliable.close(); await dropFailTrigger("products"); }
       assert.equal((await adapter.readSnapshot()).version.digest, before.version.digest);
-      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n, 0);
+      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n, 0);
     });
     await t.test("bounded statement timeout rolls back and releases lock", async () => {
       await reset();
@@ -353,7 +368,7 @@ try {
         await assert.rejects(short.execute(request(before, batch, "deadline")), errorCode("TRANSACTION_TIMEOUT"));
       } finally { await short.close(); await dropFailTrigger("products"); }
       assert.equal((await adapter.readSnapshot()).version.digest, before.version.digest);
-      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.product_import_receipts")).rows[0].n, 0);
+      assert.equal((await owner.query("SELECT count(*)::integer n FROM catalog_private.catalog_import_receipts")).rows[0].n, 0);
     });
   });
 } finally { await adapter.close(); await reset(); await owner.end(); }

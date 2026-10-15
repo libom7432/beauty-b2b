@@ -23,6 +23,7 @@
     "test:catalog-merge": "node --test scripts/test-catalog-merge.mjs",
     "test:catalog-dry-run": "node --test scripts/test-catalog-dry-run.mjs",
     "test:catalog-transaction": "node --test scripts/test-catalog-transaction.mjs",
+    "test:catalog-receipt-contract": "node --test scripts/test-catalog-receipt-contract.mjs",
     "test:catalog-postgres-concurrency": "node --test scripts/test-catalog-postgres-concurrency.mjs",
     "test:e2e": "playwright test"
   },

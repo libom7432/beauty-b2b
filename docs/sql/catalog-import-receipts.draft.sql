@@ -1,6 +1,7 @@
 -- REVIEW DRAFT ONLY: Sprint 2.5-B4.5-D1. Never picked up by Supabase migrations.
--- Do not execute until D2 approves the deployment target, adapter table rename,
--- role provisioning, retention worker, and rollback plan.
+-- D2-A aligns the adapter name and lifecycle contract, but does not execute this SQL.
+-- Do not execute until D2-B approves the deployment target, role provisioning,
+-- retention worker, local boundary tests, and rollback plan.
 BEGIN;
 
 DO $preflight$

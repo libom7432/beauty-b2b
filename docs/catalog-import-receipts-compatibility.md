@@ -1,0 +1,35 @@
+# Sprint 2.5-B4.5-D2-A: receipt compatibility review
+
+## Scope and state
+
+Started from clean `main` at `840027f8ce6ffb029f695a79d1e2213b32af772d`. This stage changes code, tests, the local-only fixture, and documentation. It does not execute SQL or connect to a production database. The D1 SQL remains under `docs/sql/`, outside `supabase/migrations/`; B2 and RFQ migrations and production import routes are unchanged.
+
+## Name and trust boundary
+
+The adapter, local-only fixture, PostgreSQL tests, and draft now refer to `catalog_private.catalog_import_receipts`. The previously initialized B4.5-B2 `catalog_import_test` database still has the prior receipt schema and must not be modified in D2-A. Both PostgreSQL test suites perform a read-only `to_regclass` check after local physical-instance verification and before any cleanup; they refuse to run without the new table. D2-B needs a freshly isolated test database, new verified physical identity guard, and explicit authorization to execute the reviewed fixture. The local fixture's current fixed data-directory/system identifier is inherited from B1 and cannot be used unchanged for an independently created cluster.
+
+Client uploads never supply trusted actor identity, receipt status, timestamps or database UUIDs. The adapter uses server-verified actor context, one PostgreSQL transaction and its existing advisory/table locks. The receipt lookup precedes snapshot-version comparison so a committed same-key request can be recovered after later catalog changes.
+
+## Lifecycle and result format
+
+On success, PostgreSQL `clock_timestamp()` supplies one `completed_at` stamp; SQL derives `retry_until = completed_at + interval '30 days'` and `result_purge_after = completed_at + interval '90 days'`. The receipt query computes `clock_timestamp() <= retry_until` on the database connection. Equality at day 30 permits replay; later requests return `IDEMPOTENCY_KEY_EXPIRED`. A different request fingerprint on the same actor/key returns `IDEMPOTENCY_CONFLICT`, including after expiry. The `(actor_id,idempotency_key)` primary key is permanent. At or after day 90 an approved maintenance transaction may set `status='expired'`, `result=NULL`, and `expired_at`; it must never delete the row. A tombstone rejects same-request replay forever. The 30-day replay window, 90-day full-result retention, and permanent key reservation are separate rules. D2-A does not implement or schedule the maintenance worker; therefore actual day-90 purging is not yet enforced operationally.
+
+The persisted JSON allowlist is exactly `status`, `import_batch_id`, `snapshot_version` (`contract`, `template_version`, `digest`), `product_count`, and `identity_map` of preview identifiers to database UUIDs. `replayed` is derived on read and is not persisted. The first result and replay have the same business fields; only the replay flag differs. Raw CSV/Excel, parsed batch, translation text, image URL, credentials, personal data, SQL errors and stack traces are excluded. The identity map remains server-side and is not a public API response. The database reader rejects extra top-level result keys, malformed identities and invalid status. A failed receipt write rolls back with catalog DML under the existing transaction.
+
+The application does not use client time or `Date.now()` to decide receipt expiry. The database clock is authoritative; changing a privileged database host clock is outside this application's control and requires infrastructure controls.
+
+## Static SQL and permission review
+
+The D1 draft and local fixture specify a composite primary key, 30/90-day timestamp checks, bounded JSONB result, committed/expired state check, due-row index, `ENABLE` plus `FORCE ROW LEVEL SECURITY`, and no receipt `DELETE` grant. `catalog_import` gets SELECT/INSERT; `catalog_admin` gets SELECT; `catalog_receipt_maintenance` is NOLOGIN/NOINHERIT with due-row SELECT and narrow UPDATE. Public, anonymous, RFQ and optional authenticated/service roles get no explicit receipt access. No SECURITY DEFINER function is introduced. The draft wraps DDL in a transaction; a failed execution should roll back all DDL. A populated receipt table must not be dropped on application rollback because that would permit key reuse.
+
+This is static review only. PostgreSQL syntax, role membership, RLS behavior, column grants, `SET ROLE`, maintenance UPDATE, version compatibility, and failed-DDL rollback remain unverified against the new schema. The existing local test owner is the `initdb` superuser and can bypass even `FORCE RLS`; owner receipt assertions therefore do not prove role isolation. D2-B must assert visibility and denials under the actual `SET ROLE` identities without broadening grants. The maintenance role and permanent tombstones require separate retention/privacy and capacity approval. The import role's all-actor receipt SELECT is constrained by the controlled service, not by per-actor RLS; a compromised service role could read other actors' compact receipt metadata/results. Review whether actor-scoped database access is needed before production.
+
+## D2-B database test design
+
+Use only a newly identified loopback PostgreSQL test instance and synthetic data. Record actual host, port, database, user, data directory and system identifier before any DDL or cleanup. Do not change host system time. Create synthetic rows with `completed_at` relative to database `clock_timestamp()` and SQL-derived deadlines, then verify: before day 30 replays; equality at day 30 replays; just after day 30 rejects; before and at day 90 the complete result remains; a due-row maintenance transaction after day 90 clears the result while preserving actor/key/fingerprint; the tombstone forever rejects replay; a different fingerprint conflicts in each state. Test concurrent same-key requests on two connections, cross-process same-key recovery, result JSON allowlist, import/admin/maintenance/public/RFQ grants and RLS, and injected migration failure rollback. Verify the old table is absent on a fresh database and that no RFQ table or permission changed. D2-B must adapt the hardcoded local fixture identity guard and owner receipt assertions before running these tests.
+
+No PostgreSQL boundary, privilege, cleanup, migration rollback or cross-process test using the new receipt schema was executed in D2-A. Pure contract tests cover allowlisting, equality semantics through the database-provided boolean, conflict/expiry precedence, identity rejection and static SQL markers; they do not replace SQL integration tests.
+
+## Gate for D2-B
+
+D2-B can begin implementation only after a fresh isolated target and its exact guard values are verified, the D1 draft and retention policy are approved, the maintenance operation and test-role approach are reviewed, and an explicit local-only SQL execution approval is given. The unchanged B1 isolated schema regression passed 28 checks in D2-A; the local cluster was then stopped. Production migration and import API remain separate decisions.

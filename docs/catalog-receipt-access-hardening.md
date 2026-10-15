@@ -1,0 +1,36 @@
+# Restricted catalog import receipt access: review draft
+
+## Scope and current path
+
+This stage adds an **unexecuted** incremental SQL draft, a restricted lookup contract and offline tests. It does not change the already executed receipt-table draft or current database permissions. No production import API or administrator identity provider exists.
+
+Current `PostgresCatalogImportTransaction.execute` checks an in-process `ActorContext`, verifies a fixed local database target, begins one transaction, assumes `catalog_import`, obtains catalog advisory lock `725604510131`, locks six catalog tables, then directly selects a receipt using `(actor_id, idempotency_key)`. A matching row is checked for fingerprint, status and database-clock retry eligibility **before** snapshot version comparison. A new import writes catalog data and the allowlisted receipt in the same transaction. On `COMMIT_UNKNOWN`, the caller must retry the original request under the same actor and key. The pool has one local database login per target; there is no deployed server route or real administrator authentication.
+
+The original receipt SQL grants table `SELECT`/`INSERT` to `catalog_import`, table `SELECT` to `catalog_admin`, and `SELECT USING (true)` to both. A holder of either role can read another actor's receipt. `NOLOGIN` and a TypeScript filter do not change that database capability.
+
+## Incremental permission proposal
+
+`docs/sql/catalog-receipt-access-hardening.draft.sql` must be reviewed and executed separately, after the original receipt migration, only under a separately approved target and migration operator. It:
+
+1. Creates a dedicated `catalog_receipt_lookup_owner` with `NOLOGIN`, `NOINHERIT`, `NOSUPERUSER`, and `NOBYPASSRLS`. The role gets only `USAGE` on the private schema and column-level receipt `SELECT` needed by the function. Temporary schema `CREATE` and migration-operator membership are revoked before commit.
+2. Adds a fixed SQL `SECURITY DEFINER` function `catalog_private.lookup_catalog_import_receipt(text,text)`. It returns at most one exact `(actor_id,key)` match and only `request_fingerprint`, `status`, five allowlisted business-result fields, and a database-clock `within_retry_window` flag. It contains no dynamic SQL. `search_path` is fixed to `pg_catalog, pg_temp`; the table and function are schema-qualified. `PUBLIC` execute is revoked in the same transaction, and only `catalog_import` receives `EXECUTE`.
+3. Revokes direct receipt `SELECT` from `catalog_import` and `catalog_admin`, drops their broad read policies, and keeps `FORCE RLS`. The function owner receives a dedicated RLS read policy. Import retains only column-level `INSERT` needed for an atomic receipt; the existing insert policy still applies. Anonymous/public/authenticated/service roles gain no access. Maintenance rights are untouched.
+4. Leaves the `(actor_id,idempotency_key)` primary key, fingerprint check, 30-day inclusive replay, 90-day result retention, expired state and permanent tombstone unchanged. No `DELETE`, receipt cleanup, RFQ grant or product-table privilege is added.
+
+The function owner is not the table owner or a superuser. A privileged migration operator must be able to create a role and temporarily `SET ROLE` to transfer function ownership; the exact effective memberships, `CREATE` revocation, column grants and RLS behavior require real non-superuser PostgreSQL testing before approval. A failed transactional migration must roll back all role, function, policy and grant changes; do not use a destructive downgrade on a populated receipt table.
+
+## Adapter rollout and server boundary
+
+The **local-only** adapter now supports `receipt_access_mode: "restricted_v1"`. In this mode, it calls the fixed two-parameter function after the existing advisory/table locks and before snapshot comparison. `restrictedCatalogReceiptLookup` takes an already verified transaction `ActorContext` and a single key; callers cannot supply a separate actor ID to that helper. The function result flows through the existing `replayCatalogReceipt` validator. The default remains `legacy_direct` solely because the incremental migration has **not** been applied to the current isolated database. Selecting `restricted_v1` before the function exists fails the transaction; after a future permission migration, leaving the legacy mode selected must fail closed because direct SELECT is revoked. Do not switch the mode or run import tests against the current database in this stage.
+
+`admin-auth.ts` currently defines provider-neutral server authorization. Only a `catalog.import.commit` grant returns a commit-capable `ActorContext`; preview and receipt-read grants do not. No real provider or admin directory is wired. The older exported `verifyCatalogActorContext` can still be called with any injected verifier by server code; its process brand is **not proof of a real authenticated administrator**. Production integration must prevent routes from using that legacy test seam directly and must not accept an actor ID, role, receipt key or database credential from the browser as authority. No receipt-read endpoint is introduced here.
+
+## Explicit residual risk
+
+The shared `catalog_import` database role can call the proposed function with **any** syntactically valid `actor_id` and key. It can also insert a row labelled with another actor ID under the existing insert policy. The function disallows bulk list operations and removes broad direct reads, but repeated targeted calls with known or guessed identifiers remain possible. It therefore **does not provide strict database-level cross-administrator isolation**. The trusted service must verify the session, map the administrator to its stable internal ID and pass only that ID, but this is application-level isolation. The compromised shared credential or SQL injection in a service with that role remains a production blocker under the previously stated strict goal. Do not describe this draft as resolving that goal. A later independently approved database-verifiable identity binding or per-actor login design would be needed.
+
+## Offline checks and next PostgreSQL stage
+
+`scripts/test-catalog-receipt-access.mjs` checks the one-key parameterized call, forged context rejection, result-field list, removal of broad grants/policies, `SECURITY DEFINER` setup, unchanged lifecycle constraints, replay/conflict/expiry behavior, and the shared-role limitation. These are static and pure-function tests; they **cannot prove effective PostgreSQL grants, RLS, role inheritance, function ownership, or lack of actor enumeration**.
+
+Before any actual permission change, verify the exact local physical target, approve the draft and rollout order, and run independent non-superuser logins for import/admin/anon/unrelated/maintenance. Test direct SELECT denial, function EXECUTE grants, function owner privileges, `SET ROLE`, `search_path`/temp shadowing, RLS/FORCE RLS, one-row result, column-level INSERT, 30-day boundary, 90-day tombstone, concurrent same-key replay, `COMMIT_UNKNOWN`, six-table atomicity, and rollback of a deliberately failed migration. Record the expected demonstration that a shared import role can still pass another actor ID; production import remains closed pending a separate security decision.

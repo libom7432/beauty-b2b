@@ -1,0 +1,107 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ts from "typescript";
+import { createCatalogReadRepository } from "../src/lib/catalog-read/repository-core.ts";
+import { createOfflineCatalogSource, notConfiguredCatalogSource } from "../src/lib/catalog-read/offline.ts";
+import { loadAdminProductsList } from "../src/lib/admin/products-list-state.ts";
+
+const require = createRequire(import.meta.url);
+const root = new URL("../", import.meta.url);
+const loadComponent = (path, extra = {}) => {
+  const source = readFileSync(new URL(path, root), "utf8");
+  const js = ts.transpileModule(source, { compilerOptions: {
+    module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022,
+  } }).outputText;
+  const compiledModule = { exports: {} };
+  const localRequire = (name) => extra[name] ?? (name === "next/link"
+    ? { default: ({ href, children, ...props }) => createElement("a", { href, ...props }, children) }
+    : require(name));
+  new Function("module", "exports", "require", js)(compiledModule, compiledModule.exports, localRequire);
+  return compiledModule.exports;
+};
+const ui = loadComponent("src/components/admin/ui.tsx");
+const { ProductListPanel } = loadComponent("src/components/admin/product-list-panel.tsx", { "./ui": ui });
+const render = (props) => renderToStaticMarkup(createElement(ProductListPanel, props));
+
+const date = "2026-10-01T00:00:00.000Z";
+const id = (n) => `${String(n).padStart(8, "0")}-0000-4000-8000-000000000000`;
+const account = { admin_id: id(999), identity_provider: "test", provider_subject: "active",
+  status: "active", created_at: date, disabled_at: null, permissions: ["catalog.read"] };
+const dependencies = {
+  provider: { async verifySession(session) { return session === "active" || session === "no-grant"
+    ? { identity_provider: "test", provider_subject: session } : null; } },
+  directory: { async findByProviderIdentity(identity) { return identity.provider_subject === "active"
+    ? account : identity.provider_subject === "no-grant" ? { ...account, provider_subject: "no-grant", permissions: [] } : null; } },
+};
+const repo = (source, session = "active") => createCatalogReadRepository(source, { session, dependencies });
+const bundle = (n, status) => {
+  const productId = id(n);
+  return { product: { id: productId, product_code: `FAMILY-${n}`, slug: `family-${n}`,
+    product_type: "press-on", status, attributes: { secret_marker: "not-for-list" },
+    customization_options: [], oem: false, odm: false, lead_time_min_days: null,
+    lead_time_max_days: null, seo_indexable: false, featured: false, new_arrival: false,
+    published_at: status === "published" ? date : null, created_at: date, updated_at: date },
+    translations: [{ product_id: productId, locale: "en", name: `Family ${n}`,
+      short_description: "", description: "private-description", seo_title: "",
+      seo_description: "", created_at: date, updated_at: date }],
+    variants: [{ id: id(n + 100), product_id: productId, sku: `SKU-${n}`, status,
+      attributes: {}, moq_quantity: "100", moq_unit: "pieces", order_multiple: null,
+      package_quantity: null, package_unit: null, reference_price: null,
+      reference_currency: null, sort_order: 0, created_at: date, updated_at: date }],
+    categoryLinks: [], categories: [], images: [{ id: id(n + 200), product_id: productId,
+      variant_id: null, storage_key: "private/secret-key.webp", public_url: "https://example.invalid/image.webp",
+      role: "primary", status, sort_order: 0, width: null, height: null, format: "webp",
+      alt_en: "", alt_zh: "", created_at: date, updated_at: date }] };
+};
+
+test("anonymous and missing catalog.read are denied before source access", async () => {
+  let reads = 0;
+  const source = { mode: "offline", async listAdmin() { reads++; return { rows: [], hasMore: false }; },
+    async getAdminByCode() { return null; }, async listPublished() { return { rows: [], hasMore: false }; },
+    async getPublishedBySlug() { return null; } };
+  for (const session of [null, "no-grant"])
+    await assert.rejects(loadAdminProductsList(repo(source, session)), (error) => error.code === "FORBIDDEN");
+  assert.equal(reads, 0);
+});
+test("NOT_CONFIGURED, EMPTY and SOURCE_UNAVAILABLE remain distinct", async () => {
+  assert.equal((await loadAdminProductsList(repo(notConfiguredCatalogSource))).kind, "not_connected");
+  assert.equal((await loadAdminProductsList(repo(createOfflineCatalogSource([])))).kind, "empty");
+  const failedSource = { mode: "offline", async listAdmin() { throw Error("postgres://secret.invalid"); },
+    async getAdminByCode() { return null; }, async listPublished() { return { rows: [], hasMore: false }; },
+    async getPublishedBySlug() { return null; } };
+  assert.deepEqual(await loadAdminProductsList(repo(failedSource)), { kind: "source_unavailable", products: [] });
+  assert.match(render({ state: "not_connected" }), /Not Connected/);
+  assert.match(render({ state: "empty" }), /No Products/);
+  const errorHtml = render({ state: "source_unavailable" });
+  assert.match(errorHtml, /Products unavailable/);
+  assert.doesNotMatch(errorHtml, /postgres|secret\.invalid|SQL/i);
+});
+test("SUCCESS displays draft, published, retired and product family links only", async () => {
+  const data = [bundle(1, "draft"), bundle(2, "published"), bundle(3, "retired")];
+  const state = await loadAdminProductsList(repo(createOfflineCatalogSource(data)));
+  assert.equal(state.kind, "success");
+  const html = render({ state: state.kind, products: state.products, testData: true });
+  for (const label of ["Product Code", "Product Name", "Product Type", "Status", "Primary Category", "Variants", "Updated At",
+    "draft", "published", "retired", "TEST DATA", "Unavailable", "2026-10-01"])
+    assert.ok(html.includes(label), label);
+  for (const n of [1, 2, 3]) assert.match(html, new RegExp(`href="/admin/products/FAMILY-${n}"`));
+  for (const secret of ["SKU-1", "private/secret-key", "not-for-list", "private-description", "postgres://"])
+    assert.equal(html.includes(secret), false, secret);
+  assert.equal(render({ state: state.kind, products: state.products }).includes("TEST DATA"), false);
+});
+test("default page uses trusted server wiring with no query-controlled source switch", () => {
+  const page = readFileSync(new URL("src/app/admin/(workspace)/products/page.tsx", root), "utf8");
+  const server = readFileSync(new URL("src/lib/catalog-read/server.ts", root), "utf8");
+  const loading = readFileSync(new URL("src/app/admin/(workspace)/products/loading.tsx", root), "utf8");
+  assert.ok(page.indexOf('requireAdminPage("catalog.read")') < page.indexOf("createServerCatalogReadRepository()"));
+  assert.match(page, /error\.code === "FORBIDDEN"\) redirect\("\/admin\/login\?error=1"\)/);
+  assert.match(server, /^import "server-only";/);
+  assert.match(server, /notConfiguredCatalogSource/);
+  assert.doesNotMatch(page + server, /searchParams|ADMIN_UI_FIXTURE|TEST_DATA|request\.url|process\.env/);
+  assert.match(loading, /state="loading"/);
+  assert.match(render({ state: "loading" }), /Loading products/);
+});

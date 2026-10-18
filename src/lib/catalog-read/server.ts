@@ -1,10 +1,12 @@
 import "server-only";
 import { createCatalogReadRepository } from "./repository-core.ts";
 import { notConfiguredCatalogSource } from "./offline.ts";
-import type { CatalogAuthDependencies } from "../catalog-import/admin-auth.ts";
+import { createAdminAuthClient } from "../admin/supabase-server.ts";
+import { adminDependencies } from "../admin/server-access.ts";
 
-/** Server entrypoint. B1 has no database adapter or credentials. */
-export function createServerCatalogReadRepository(admin: Readonly<{
-  session: unknown; dependencies: CatalogAuthDependencies }> | null = null) {
-  return createCatalogReadRepository(notConfiguredCatalogSource, admin);
+/** Trusted server wiring only. B2-A still has no database adapter or credentials. */
+export async function createServerCatalogReadRepository() {
+  const client = await createAdminAuthClient();
+  return createCatalogReadRepository(notConfiguredCatalogSource,
+    client ? { session: client, dependencies: adminDependencies(client) } : null);
 }

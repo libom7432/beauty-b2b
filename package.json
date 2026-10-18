@@ -24,16 +24,20 @@
     "test:catalog-dry-run": "node --test scripts/test-catalog-dry-run.mjs",
     "test:catalog-transaction": "node --test scripts/test-catalog-transaction.mjs",
     "test:catalog-receipt-contract": "node --test scripts/test-catalog-receipt-contract.mjs",
+    "test:admin": "node --test scripts/test-admin-auth.mjs scripts/test-catalog-admin-auth.mjs",
     "test:catalog-postgres-concurrency": "node --test scripts/test-catalog-postgres-concurrency.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
     "exceljs": "^4.4.0",
     "next": "16.3.8",
     "pg": "^8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "saxes": "^6.0.0",
+    "server-only": "^0.0.1",
     "yauzl": "^3.4.0"
   },
   "devDependencies": {

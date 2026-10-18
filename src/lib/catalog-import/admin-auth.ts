@@ -2,9 +2,11 @@
 import { CatalogImportError, verifyCatalogActorContext, type ActorContext } from "./transaction.ts";
 
 export const CATALOG_PERMISSIONS = [
+  "catalog.read", "catalog.create", "catalog.update", "catalog.publish", "catalog.retire", "catalog.images.manage",
   "catalog.import.preview",
   "catalog.import.commit",
   "catalog.import.receipt.read",
+  "catalog.import.receipts.read",
 ] as const;
 export type CatalogPermission = (typeof CATALOG_PERMISSIONS)[number];
 export type AdminIdentity = Readonly<{
@@ -30,6 +32,18 @@ export type CatalogAuthDependencies = Readonly<{
   provider: CatalogIdentityProvider;
   directory: CatalogAdminDirectory;
 }>;
+/** The directory, never a browser claim, is the authority for account state and grants. */
+export async function requireAdminIdentity(session: unknown, dependencies: CatalogAuthDependencies): Promise<AdminIdentity> {
+  if (!dependencies?.provider?.verifySession || !dependencies?.directory?.findByProviderIdentity) return denied();
+  const verified = await dependencies.provider.verifySession(session);
+  if (!verified || typeof verified.identity_provider !== "string" || !verified.identity_provider.trim()
+    || typeof verified.provider_subject !== "string" || !verified.provider_subject.trim()) return denied();
+  const admin = await dependencies.directory.findByProviderIdentity(verified);
+  if (!admin || admin.identity_provider !== verified.identity_provider || admin.provider_subject !== verified.provider_subject
+    || !UUID.test(admin.admin_id) || admin.status !== "active" || admin.disabled_at !== null
+    || !validDate(admin.created_at) || !Array.isArray(admin.permissions)) return denied();
+  return admin;
+}
 export type AuthorizedCatalogActor = Readonly<{
   admin_id: string;
   actor_id: string;
@@ -60,15 +74,9 @@ export async function requireCatalogPermission(
   permission: CatalogPermission,
   dependencies: CatalogAuthDependencies,
 ): Promise<AuthorizedCatalogActor | AuthorizedCatalogCommit> {
-  if (!CATALOG_PERMISSIONS.includes(permission) || !dependencies?.provider?.verifySession || !dependencies?.directory?.findByProviderIdentity)
-    return denied();
-  const verified = await dependencies.provider.verifySession(session);
-  if (!verified || typeof verified.identity_provider !== "string" || !verified.identity_provider.trim()
-    || typeof verified.provider_subject !== "string" || !verified.provider_subject.trim()) return denied();
-  const admin = await dependencies.directory.findByProviderIdentity(verified);
-  if (!admin || admin.identity_provider !== verified.identity_provider || admin.provider_subject !== verified.provider_subject
-    || !UUID.test(admin.admin_id) || admin.status !== "active" || admin.disabled_at !== null
-    || !validDate(admin.created_at) || !Array.isArray(admin.permissions) || !admin.permissions.includes(permission)) return denied();
+  if (!CATALOG_PERMISSIONS.includes(permission)) return denied();
+  const admin = await requireAdminIdentity(session, dependencies);
+  if (!admin.permissions.includes(permission)) return denied();
   if (permission !== "catalog.import.commit")
     return Object.freeze({ admin_id: admin.admin_id, actor_id: admin.admin_id, permission });
   const actor_context = await verifyCatalogActorContext(null, async () => ({ actor_id: admin.admin_id, role: "catalog_import" }));

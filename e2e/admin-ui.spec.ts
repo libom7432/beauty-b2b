@@ -1,17 +1,17 @@
 import { test, expect } from "@playwright/test";
+import { fixtureCookies, fixtureOrigin, startAdminFixture, stopAdminFixture } from "./support/admin-site";
 
-// Run only against an isolated copy whose server authorization modules are replaced
-// by test doubles. Production source never accepts this fixture cookie.
-test.skip(process.env.ADMIN_UI_FIXTURE !== "1", "Requires isolated server-side Admin UI fixture");
+test.beforeAll(async () => { await startAdminFixture(); });
+test.afterAll(async () => { await stopAdminFixture(); });
+test.setTimeout(120_000);
 
-const origin = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT || "3000"}`;
 async function asFixture(context: { addCookies: (cookies: { name: string; value: string; url: string }[]) => Promise<void> }, role: string) {
-  await context.addCookies([{ name: "admin-ui-fixture", value: role, url: origin }]);
+  await fixtureCookies(context, undefined, role);
 }
 
 test("verified fixture sees navigation, active route and read-only Dashboard", async ({ page, context }, testInfo) => {
   await asFixture(context, "editor");
-  await page.goto("/admin");
+  await page.goto(`${fixtureOrigin}/admin`);
   if (testInfo.project.name === "mobile-chrome") await page.getByRole("button", { name: "Open admin menu" }).click();
   const nav = page.locator('nav[aria-label="Admin navigation"]:visible');
   await expect(nav.locator('a[href="/admin"]')).toHaveAttribute("aria-current", "page");
@@ -26,12 +26,12 @@ test("verified fixture sees navigation, active route and read-only Dashboard", a
 
 test("Products default to an empty table and detail reveals no database record", async ({ page, context }) => {
   await asFixture(context, "editor");
-  await page.goto("/admin/products");
+  await page.goto(`${fixtureOrigin}/admin/products`);
   await expect(page.getByRole("columnheader", { name: "Product Code" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "Variants" })).toBeVisible();
   await expect(page.getByText("Product database not connected")).toBeVisible();
   await expect(page.getByRole("button", { name: /add|edit|delete|publish/i })).toHaveCount(0);
-  await page.goto("/admin/products/TEST-001");
+  await page.goto(`${fixtureOrigin}/admin/products/TEST-001`);
   await expect(page.getByText("TEST-001")).toBeVisible();
   await expect(page.getByText("The requested code has not been looked up in a database.")).toBeVisible();
   for (const title of ["Basic Information", "Translations", "Categories", "Variants", "MOQ", "Tiered Pricing", "Product Images", "SEO", "Publishing Status"]) {
@@ -42,10 +42,10 @@ test("Products default to an empty table and detail reveals no database record",
 
 test("fixture with no catalog grant cannot view products or see catalog navigation", async ({ page, context }, testInfo) => {
   await asFixture(context, "dashboard");
-  await page.goto("/admin");
+  await page.goto(`${fixtureOrigin}/admin`);
   if (testInfo.project.name === "mobile-chrome") await page.getByRole("button", { name: "Open admin menu" }).click();
   await expect(page.locator('nav[aria-label="Admin navigation"]:visible a[href="/admin/products"]')).toHaveCount(0);
-  await page.goto("/admin/products");
+  await page.goto(`${fixtureOrigin}/admin/products`);
   await expect(page).toHaveURL(/\/admin\/login(?:\?.*)?$/);
 });
 
@@ -53,7 +53,7 @@ test("placeholder navigation stays read only", async ({ page, context }, testInf
   await asFixture(context, "editor");
   for (const [path, title] of [["/admin/categories", "Categories"], ["/admin/collections", "Collections"],
     ["/admin/media", "Media"], ["/admin/imports", "Imports"]] as const) {
-    await page.goto(path);
+    await page.goto(`${fixtureOrigin}${path}`);
     await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
     await expect(page.getByText("NO WRITE ACTIONS")).toBeVisible();
     if (testInfo.project.name === "mobile-chrome") await page.getByRole("button", { name: "Open admin menu" }).click();
@@ -63,19 +63,19 @@ test("placeholder navigation stays read only", async ({ page, context }, testInf
 
 test("catalog reader without receipt permission cannot open Imports", async ({ page, context }, testInfo) => {
   await asFixture(context, "catalog-only");
-  await page.goto("/admin");
+  await page.goto(`${fixtureOrigin}/admin`);
   if (testInfo.project.name === "mobile-chrome") await page.getByRole("button", { name: "Open admin menu" }).click();
   const nav = page.locator('nav[aria-label="Admin navigation"]:visible');
   await expect(nav.locator('a[href="/admin/products"]')).toHaveCount(1);
   await expect(nav.locator('a[href="/admin/imports"]')).toHaveCount(0);
-  await page.goto("/admin/imports");
+  await page.goto(`${fixtureOrigin}/admin/imports`);
   await expect(page).toHaveURL(/\/admin\/login(?:\?.*)?$/);
 });
 
 test("mobile dialog traps forward and reverse keyboard focus and isolates the background", async ({ page, context }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chrome", "Mobile viewport only");
   await asFixture(context, "editor");
-  await page.goto("/admin/products");
+  await page.goto(`${fixtureOrigin}/admin/products`);
   const trigger = page.getByRole("button", { name: "Open admin menu" });
   const dialog = page.getByRole("dialog", { name: "Admin menu" });
   await trigger.click();
@@ -101,7 +101,7 @@ test("mobile dialog traps forward and reverse keyboard focus and isolates the ba
 test("Escape, backdrop and close button restore focus and page operation", async ({ page, context }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chrome", "Mobile viewport only");
   await asFixture(context, "editor");
-  await page.goto("/admin/products");
+  await page.goto(`${fixtureOrigin}/admin/products`);
   const trigger = page.getByRole("button", { name: "Open admin menu" });
   const dialog = page.getByRole("dialog", { name: "Admin menu" });
   await trigger.click();
@@ -125,7 +125,7 @@ test("Escape, backdrop and close button restore focus and page operation", async
 test("navigation, browser history and viewport changes close the mobile dialog", async ({ page, context }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-chrome", "Mobile viewport only");
   await asFixture(context, "editor");
-  await page.goto("/admin");
+  await page.goto(`${fixtureOrigin}/admin`);
   const trigger = page.getByRole("button", { name: "Open admin menu" });
   const dialog = page.getByRole("dialog", { name: "Admin menu" });
   await trigger.click();
@@ -162,7 +162,7 @@ test("navigation, browser history and viewport changes close the mobile dialog",
 test("desktop sidebar remains usable without a modal dialog", async ({ page, context }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chrome", "Desktop viewport only");
   await asFixture(context, "editor");
-  await page.goto("/admin");
+  await page.goto(`${fixtureOrigin}/admin`);
   const sidebar = page.getByRole("complementary", { name: "Admin sidebar" });
   await expect(sidebar).toBeVisible();
   await expect(page.getByRole("dialog", { name: "Admin menu" })).toBeHidden();

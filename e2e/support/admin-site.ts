@@ -1,0 +1,194 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const repositoryRoot = process.cwd();
+let fixtureRoot = "";
+export let fixtureOrigin = "";
+let fixtureServer: ChildProcess | undefined;
+
+// These replacements exist only in a temporary copy. The repository's Auth and
+// Catalog server entry points are never modified or switched by request input.
+const accessFixture = `
+import "server-only";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import type { CatalogPermission } from "../catalog-import/admin-auth.ts";
+export async function requireAdminPage(permission?: CatalogPermission) {
+  const role = (await cookies()).get("admin-ui-fixture")?.value;
+  if (!role) redirect("/admin/login");
+  const permissions = role === "editor" ? ["catalog.read", "catalog.import.receipt.read"] :
+    role === "catalog-only" ? ["catalog.read"] : [];
+  if (permission && !permissions.includes(permission)) redirect("/admin/login?error=1");
+}
+`;
+
+const identityFixture = `
+import "server-only";
+import { cache } from "react";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import type { AdminIdentity } from "../catalog-import/admin-auth.ts";
+export const getAdminUIIdentity = cache(async () => {
+  const role = (await cookies()).get("admin-ui-fixture")?.value;
+  if (!role) redirect("/admin/login");
+  return { admin_id: "11111111-1111-4111-8111-111111111111",
+    identity_provider: "fixture", provider_subject: "fixture-admin", status: "active",
+    created_at: "2026-10-18T00:00:00Z", disabled_at: null,
+    permissions: role === "editor" ? ["catalog.read", "catalog.import.receipt.read"] :
+      role === "catalog-only" ? ["catalog.read"] : [] } as AdminIdentity;
+});
+`;
+
+const catalogFixture = `
+import "server-only";
+import { cookies } from "next/headers";
+import { createCatalogReadRepository } from "./repository-core.ts";
+import { createAdminCursorCodec } from "./admin-cursor.ts";
+import { createOfflineCatalogSource, notConfiguredCatalogSource } from "./offline.ts";
+import type { PrivateCatalogBundle } from "./types.ts";
+const date = "2026-10-01T00:00:00.000Z";
+const id = (n: number) => \`\${String(n).padStart(8, "0")}-0000-4000-8000-000000000000\`;
+function row(n: number, status: "draft" | "published" | "retired"): PrivateCatalogBundle {
+  const productId = id(n);
+  return { product: { id: productId, product_code: \`FAMILY-\${n}\`, slug: \`family-\${n}\`,
+    product_type: "press-on", status, attributes: {}, customization_options: [], oem: false,
+    odm: false, lead_time_min_days: null, lead_time_max_days: null, seo_indexable: false,
+    featured: false, new_arrival: false, published_at: status === "published" ? date : null,
+    created_at: date, updated_at: date },
+    translations: [{ product_id: productId, locale: "en", name: \`Family \${n}\`,
+      short_description: "", description: "", seo_title: "", seo_description: "",
+      created_at: date, updated_at: date },
+      { product_id: productId, locale: "zh", name: \`家族 \${n}\`,
+      short_description: "", description: "", seo_title: "", seo_description: "",
+      created_at: date, updated_at: date }],
+    variants: [{ id: id(n + 100), product_id: productId, sku: \`SKU-\${n + 100}\`, status,
+      attributes: {}, moq_quantity: "100", moq_unit: "pieces", order_multiple: null,
+      package_quantity: null, package_unit: null, reference_price: null,
+      reference_currency: null, sort_order: 0, created_at: date, updated_at: date }],
+    categoryLinks: [{ product_id: productId, category_id: id(n <= 3 ? 701 : 702),
+      is_primary: true, sort_order: 0, created_at: date, updated_at: date },
+      ...(n === 1 ? [{ product_id: productId, category_id: id(702),
+        is_primary: false, sort_order: 1, created_at: date, updated_at: date }] : [])],
+    categories: [701, 702].map((number) => ({ id: id(number), parent_id: null,
+      slug: number === 701 ? "nails" : "care", status: "published" as const,
+      name_en: number === 701 ? "Nails" : "Care", name_zh: number === 701 ? "美甲" : "护理",
+      description_en: "", description_zh: "", sort_order: number,
+      created_at: date, updated_at: date })),
+    images: [{ id: id(n + 200), product_id: productId,
+      variant_id: null, storage_key: "private/fixture.webp", public_url: "https://example.invalid/image.webp",
+      role: "primary", status, sort_order: 0, width: null, height: null, format: "webp",
+      alt_en: "", alt_zh: "", created_at: date, updated_at: date }] };
+}
+const sample = createOfflineCatalogSource([row(1, "draft"), row(2, "published"), row(3, "retired")]);
+const querySample = createOfflineCatalogSource(Array.from({ length: 45 }, (_, index) =>
+  row(index + 1, index % 3 === 0 ? "draft" : index % 3 === 1 ? "published" : "retired")));
+const legacyOptions = { mode: "offline" as const, listAdmin: sample.listAdmin,
+  getAdminByCode: sample.getAdminByCode, listPublished: sample.listPublished,
+  getPublishedBySlug: sample.getPublishedBySlug };
+const empty = createOfflineCatalogSource([]);
+const failed = { mode: "offline" as const,
+  async listAdmin(): Promise<never> { throw Error("postgres://secret.invalid"); },
+  async getAdminByCode() { return null; },
+  async listPublished() { return { rows: [], hasMore: false }; },
+  async getPublishedBySlug() { return null; } };
+export async function createServerCatalogReadRepository() {
+  const cookieStore = await cookies();
+  const role = cookieStore.get("admin-ui-fixture")?.value;
+  const state = cookieStore.get("catalog-read-fixture")?.value;
+  const source = state === "success" ? sample : state === "query" ? querySample :
+    state === "legacy-options" ? legacyOptions : state === "empty" ? empty :
+    state === "error" ? failed : notConfiguredCatalogSource;
+  return createCatalogReadRepository(source, {
+    session: role,
+    dependencies: {
+      provider: { async verifySession(session) {
+        return session === "editor" || session === "catalog-only"
+          ? { identity_provider: "fixture", provider_subject: session } : null;
+      } },
+      directory: { async findByProviderIdentity(identity) {
+        return { admin_id: id(999), identity_provider: "fixture", provider_subject: identity.provider_subject,
+          status: "active", created_at: date, disabled_at: null,
+          permissions: state === "forbidden" ? [] : role === "editor"
+            ? ["catalog.read", "catalog.import.receipt.read"] : ["catalog.read"] };
+      } },
+    },
+  }, createAdminCursorCodec(process.env.ADMIN_CATALOG_CURSOR_SIGNING_KEY ?? ""));
+}
+`;
+
+async function unusedPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw Error("Unable to allocate fixture port");
+  const port = address.port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}
+
+export async function startAdminFixture() {
+  try {
+    fixtureRoot = mkdtempSync(join(tmpdir(), "beauty-admin-products-"));
+    for (const entry of ["src", "public", "package.json", "next.config.ts", "postcss.config.mjs", "tsconfig.json"]) {
+      cpSync(join(repositoryRoot, entry), join(fixtureRoot, entry), { recursive: true });
+    }
+    const dependencies = join(repositoryRoot, "node_modules");
+    if (!existsSync(dependencies)) throw Error("Install project dependencies before running browser tests");
+    symlinkSync(dependencies, join(fixtureRoot, "node_modules"), "dir");
+    writeFileSync(join(fixtureRoot, "src/lib/admin/server-access.ts"), accessFixture);
+    writeFileSync(join(fixtureRoot, "src/lib/admin/ui-identity.ts"), identityFixture);
+    writeFileSync(join(fixtureRoot, "src/lib/catalog-read/server.ts"), catalogFixture);
+    const panelPath = join(fixtureRoot, "src/components/admin/product-list-panel.tsx");
+    const panelSource = readFileSync(panelPath, "utf8");
+    if (!panelSource.includes("testData = false")) throw Error("Admin products fixture no longer matches the list panel");
+    writeFileSync(panelPath, panelSource.replace("testData = false", "testData = true"));
+
+    fixtureOrigin = `http://127.0.0.1:${await unusedPort()}`;
+    fixtureServer = spawn(process.execPath, [join(dependencies, "next/dist/bin/next"), "dev", "--webpack",
+      "--hostname", "127.0.0.1", "--port", new URL(fixtureOrigin).port], {
+      cwd: fixtureRoot,
+      env: { ...process.env, NEXT_PUBLIC_SUPABASE_URL: "", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "",
+        ADMIN_DIRECTORY_DATABASE_URL: "", DATABASE_URL: "", RFQ_DATABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "",
+        ADMIN_CATALOG_CURSOR_SIGNING_KEY: randomBytes(32).toString("base64url") },
+      stdio: "ignore",
+    });
+    const deadline = Date.now() + 110_000;
+    while (Date.now() < deadline) {
+      if (fixtureServer.exitCode !== null) throw Error("Isolated Admin fixture exited during startup");
+      try {
+        const response = await fetch(`${fixtureOrigin}/admin/login`);
+        if (response.ok) return;
+      } catch { /* Wait for the local fixture to start. */ }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw Error("Isolated Admin fixture did not start in time");
+  } catch (error) {
+    await stopAdminFixture();
+    throw error;
+  }
+}
+
+export async function stopAdminFixture() {
+  if (fixtureServer && fixtureServer.exitCode === null) {
+    fixtureServer.kill("SIGTERM");
+    await Promise.race([
+      new Promise<void>((resolve) => fixtureServer?.once("exit", () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+    ]);
+    if (fixtureServer.exitCode === null) fixtureServer.kill("SIGKILL");
+  }
+  if (fixtureRoot) rmSync(fixtureRoot, { recursive: true, force: true });
+  fixtureServer = undefined;
+  fixtureRoot = "";
+  fixtureOrigin = "";
+}
+
+export async function fixtureCookies(context: { addCookies: (cookies: { name: string; value: string; url: string }[]) => Promise<void> }, state?: string, role = "editor") {
+  const cookies = [{ name: "admin-ui-fixture", value: role, url: fixtureOrigin }];
+  if (state) cookies.push({ name: "catalog-read-fixture", value: state, url: fixtureOrigin });
+  await context.addCookies(cookies);
+}

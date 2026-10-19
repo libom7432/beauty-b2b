@@ -10,6 +10,8 @@ import { createCatalogReadRepository } from "../src/lib/catalog-read/repository-
 import { createAdminCursorCodec } from "../src/lib/catalog-read/admin-cursor.ts";
 import { createOfflineCatalogSource, notConfiguredCatalogSource } from "../src/lib/catalog-read/offline.ts";
 import { loadAdminProductsList } from "../src/lib/admin/products-list-state.ts";
+import { adminProductsHref } from "../src/lib/admin/products-query.ts";
+import { adminProductDetailHref } from "../src/lib/admin/product-detail-navigation.ts";
 
 const require = createRequire(import.meta.url);
 const root = new URL("../", import.meta.url);
@@ -26,7 +28,10 @@ const loadComponent = (path, extra = {}) => {
   return compiledModule.exports;
 };
 const ui = loadComponent("src/components/admin/ui.tsx");
-const { ProductListPanel } = loadComponent("src/components/admin/product-list-panel.tsx", { "./ui": ui });
+const { ProductListPanel } = loadComponent("src/components/admin/product-list-panel.tsx", {
+  "./ui": ui, "@/lib/admin/products-query": { adminProductsHref },
+  "@/lib/admin/product-detail-navigation": { adminProductDetailHref },
+});
 const render = (props) => renderToStaticMarkup(createElement(ProductListPanel, props));
 
 const date = "2026-10-01T00:00:00.000Z";

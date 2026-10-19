@@ -85,6 +85,11 @@
 .admin-state strong { font-size: 13px; }
 .admin-state p { max-width: 340px; margin: 8px 0 0; color: var(--admin-muted); font-size: 12px; line-height: 1.6; }
 .admin-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.admin-detail-wide { grid-column: 1 / -1; }
+.admin-detail-sections { display: grid; gap: 18px; margin-top: 15px; }
+.admin-detail-sections section { min-width: 0; }
+.admin-detail-sections h3 { margin: 0; color: #42644b; font-size: 12px; }
+.admin-detail-sku, .admin-detail-grid .admin-table td { overflow-wrap: anywhere; word-break: break-word; }
 .admin-detail-list { display: grid; gap: 13px; margin: 17px 0 0; }
 .admin-detail-list div { display: flex; justify-content: space-between; gap: 20px; padding-top: 12px; border-top: 1px solid var(--admin-line); }
 .admin-detail-list dt { color: var(--admin-muted); font-size: 11px; }

@@ -62,16 +62,21 @@ function row(n: number, status: "draft" | "published" | "retired"): PrivateCatal
     translations: [{ product_id: productId, locale: "en", name: \`Family \${n}\`,
       short_description: "", description: "", seo_title: "", seo_description: "",
       created_at: date, updated_at: date },
-      { product_id: productId, locale: "zh", name: \`家族 \${n}\`,
+      ...(n === 3 ? [] : [{ product_id: productId, locale: "zh" as const, name: \`家族 \${n}\`,
       short_description: "", description: "", seo_title: "", seo_description: "",
-      created_at: date, updated_at: date }],
+      created_at: date, updated_at: date }])],
     variants: [{ id: id(n + 100), product_id: productId, sku: \`SKU-\${n + 100}\`, status,
       attributes: {}, moq_quantity: "100", moq_unit: "pieces", order_multiple: null,
       package_quantity: null, package_unit: null, reference_price: null,
-      reference_currency: null, sort_order: 0, created_at: date, updated_at: date }],
+      reference_currency: null, sort_order: 0, created_at: date, updated_at: date },
+      ...(n === 2 ? [{ id: id(n + 300), product_id: productId, sku: "SKU-SECONDARY-" + "X".repeat(120),
+        status: "draft" as const, attributes: { color: "red" }, moq_quantity: "250",
+        moq_unit: "pieces", order_multiple: null, package_quantity: null, package_unit: null,
+        reference_price: null, reference_currency: null, sort_order: 1,
+        created_at: date, updated_at: date }] : [])],
     categoryLinks: [{ product_id: productId, category_id: id(n <= 3 ? 701 : 702),
       is_primary: true, sort_order: 0, created_at: date, updated_at: date },
-      ...(n === 1 ? [{ product_id: productId, category_id: id(702),
+      ...(n === 1 || n === 2 ? [{ product_id: productId, category_id: id(702),
         is_primary: false, sort_order: 1, created_at: date, updated_at: date }] : [])],
     categories: [701, 702].map((number) => ({ id: id(number), parent_id: null,
       slug: number === 701 ? "nails" : "care", status: "published" as const,
@@ -81,7 +86,12 @@ function row(n: number, status: "draft" | "published" | "retired"): PrivateCatal
     images: [{ id: id(n + 200), product_id: productId,
       variant_id: null, storage_key: "private/fixture.webp", public_url: "https://example.invalid/image.webp",
       role: "primary", status, sort_order: 0, width: null, height: null, format: "webp",
-      alt_en: "", alt_zh: "", created_at: date, updated_at: date }] };
+      alt_en: "Front view", alt_zh: "正面", created_at: date, updated_at: date },
+      ...(n === 2 ? [{ id: id(n + 400), product_id: productId, variant_id: id(n + 300),
+        storage_key: "private/variant.webp", public_url: "https://example.invalid/variant.webp",
+        role: "variant" as const, status: "draft" as const, sort_order: 1,
+        width: null, height: null, format: "webp" as const, alt_en: "Variant view", alt_zh: "",
+        created_at: date, updated_at: date }] : [])] };
 }
 const sample = createOfflineCatalogSource([row(1, "draft"), row(2, "published"), row(3, "retired")]);
 const querySample = createOfflineCatalogSource(Array.from({ length: 45 }, (_, index) =>
@@ -92,7 +102,7 @@ const legacyOptions = { mode: "offline" as const, listAdmin: sample.listAdmin,
 const empty = createOfflineCatalogSource([]);
 const failed = { mode: "offline" as const,
   async listAdmin(): Promise<never> { throw Error("postgres://secret.invalid"); },
-  async getAdminByCode() { return null; },
+  async getAdminByCode(): Promise<never> { throw Error("postgres://secret.invalid"); },
   async listPublished() { return { rows: [], hasMore: false }; },
   async getPublishedBySlug() { return null; } };
 export async function createServerCatalogReadRepository() {
@@ -146,6 +156,10 @@ export async function startAdminFixture() {
     const panelSource = readFileSync(panelPath, "utf8");
     if (!panelSource.includes("testData = false")) throw Error("Admin products fixture no longer matches the list panel");
     writeFileSync(panelPath, panelSource.replace("testData = false", "testData = true"));
+    const detailPath = join(fixtureRoot, "src/components/admin/product-detail-panel.tsx");
+    const detailSource = readFileSync(detailPath, "utf8");
+    if (!detailSource.includes("testData = false")) throw Error("Admin detail fixture no longer matches the detail panel");
+    writeFileSync(detailPath, detailSource.replace("testData = false", "testData = true"));
 
     fixtureOrigin = `http://127.0.0.1:${await unusedPort()}`;
     fixtureServer = spawn(process.execPath, [join(dependencies, "next/dist/bin/next"), "dev", "--webpack",

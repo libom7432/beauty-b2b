@@ -24,7 +24,7 @@ test("verified fixture sees navigation, active route and read-only Dashboard", a
   await expect(nav.locator('a[href="/admin/products"]')).toHaveAttribute("aria-current", "page");
 });
 
-test("Products default to an empty table and detail reveals no database record", async ({ page, context }) => {
+test("Products and detail remain disconnected without a data source", async ({ page, context }) => {
   await asFixture(context, "editor");
   await page.goto(`${fixtureOrigin}/admin/products`);
   await expect(page.getByRole("columnheader", { name: "Product Code" })).toBeVisible();
@@ -32,12 +32,9 @@ test("Products default to an empty table and detail reveals no database record",
   await expect(page.getByText("Product database not connected")).toBeVisible();
   await expect(page.getByRole("button", { name: /add|edit|delete|publish/i })).toHaveCount(0);
   await page.goto(`${fixtureOrigin}/admin/products/TEST-001`);
-  await expect(page.getByText("TEST-001")).toBeVisible();
-  await expect(page.getByText("The requested code has not been looked up in a database.")).toBeVisible();
-  for (const title of ["Basic Information", "Translations", "Categories", "Variants", "MOQ", "Tiered Pricing", "Product Images", "SEO", "Publishing Status"]) {
-    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
-  }
-  await expect(page.getByText("No verified product record is connected.")).toBeVisible();
+  await expect(page.getByText("Product database not connected")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Back to Products" })).toHaveAttribute("href", "/admin/products");
+  await expect(page.getByRole("heading", { name: "Basic Information" })).toHaveCount(0);
 });
 
 test("fixture with no catalog grant cannot view products or see catalog navigation", async ({ page, context }, testInfo) => {

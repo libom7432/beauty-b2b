@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { createCatalogReadRepository } from "../src/lib/catalog-read/repository-core.ts";
+import { createAdminCursorCodec } from "../src/lib/catalog-read/admin-cursor.ts";
 import { createOfflineCatalogSource, notConfiguredCatalogSource, projectPublicCatalogBundle } from "../src/lib/catalog-read/offline.ts";
 import { mapCategories, referencePrice, safeBigint, toPublic } from "../src/lib/catalog-read/mapping.ts";
 
@@ -53,8 +55,9 @@ const directory = {
       permissions: ["catalog.read"] };
   } },
 };
+const cursorCodec = createAdminCursorCodec(randomBytes(32).toString("base64url"));
 const repo = (session = "valid", data = fixtures) => createCatalogReadRepository(createOfflineCatalogSource(data),
-  { session, dependencies: directory });
+  { session, dependencies: directory }, cursorCodec);
 const rejects = (promise, code) => assert.rejects(promise, (error) => error?.code === code);
 
 test("published projection filters draft/retired product, variants and images", async () => {
@@ -169,13 +172,13 @@ test("permission failure precedes source query", async () => {
   const source = { mode: "offline", async listAdmin() { called++; return { rows: [], hasMore: false }; },
     async getAdminByCode() { called++; return null; }, async listPublished() { return { rows: [], hasMore: false }; },
     async getPublishedBySlug() { return null; } };
-  const denied = createCatalogReadRepository(source, { session: "ordinary", dependencies: directory });
+  const denied = createCatalogReadRepository(source, { session: "ordinary", dependencies: directory }, cursorCodec);
   await rejects(denied.listAdminProducts(), "FORBIDDEN");
   await rejects(denied.getAdminProductByCode("FAMILY-1"), "FORBIDDEN");
   assert.equal(called, 0);
 });
 test("not configured and source failure remain distinct from not found", async () => {
-  const disconnected = createCatalogReadRepository(notConfiguredCatalogSource, { session: "valid", dependencies: directory });
+  const disconnected = createCatalogReadRepository(notConfiguredCatalogSource, { session: "valid", dependencies: directory }, cursorCodec);
   await rejects(disconnected.listPublishedProducts(), "NOT_CONFIGURED");
   await rejects(disconnected.listAdminProducts(), "NOT_CONFIGURED");
   const failing = createCatalogReadRepository({ mode: "offline", async listPublished() { throw Error("SECRET SQL"); },

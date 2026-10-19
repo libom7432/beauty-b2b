@@ -87,18 +87,31 @@ export type PublicProductDTO = Readonly<{ id: string; productCode: string; slug:
   categories: CategoryAssignmentDTO; variants: readonly PublicVariantDTO[];
   images: readonly PublicImageDTO[]; collections: Availability<never> }>;
 export type CatalogScope = "public" | "admin";
-export type CatalogSort = "featured" | "newest" | "updated";
+export type CatalogSort = "featured" | "newest" | "updated" | "updated_desc" |
+  "updated_asc" | "product_code_asc" | "product_code_desc";
 export type CatalogListQuery = Readonly<{ limit?: number; cursor?: string; sort?: CatalogSort;
-  productType?: string; categoryId?: string; status?: CatalogStatus }>;
+  productType?: string; categoryId?: string; primaryCategoryId?: string;
+  search?: string; status?: CatalogStatus; direction?: "after" | "before" }>;
 export type SourceQuery = Readonly<{ limit: number; cursor: string | null; sort: CatalogSort;
-  productType?: string; categoryId?: string; status?: CatalogStatus }>;
-export type SourcePage<T> = Readonly<{ rows: readonly T[]; hasMore: boolean }>;
+  productType?: string; categoryId?: string; primaryCategoryId?: string;
+  search?: string; status?: CatalogStatus; direction: "after" | "before";
+  /** Verified by the Repository before an Admin source is called. Admin adapters must
+   * use this boundary, never parse the raw cursor or accept a client boundary. */
+  adminCursorBoundary?: import("./admin-cursor.ts").AdminCursorBoundary }>;
+export type SourcePage<T> = Readonly<{ rows: readonly T[]; hasMore: boolean; hasPrevious?: boolean }>;
+export type AdminCategoryOption = Readonly<{ id: string; nameEn: string; nameZh: string }>;
+export type AdminCategoryOptions = Readonly<{ items: readonly AdminCategoryOption[]; hasMore: boolean }>;
 export interface CatalogReadSource {
-  /** A future read_only adapter must query catalog_public views for public methods. */
+  /** A future read_only adapter must query catalog_public views for public methods.
+   * Admin reads must bind search values, escape LIKE wildcards, whitelist ordering,
+   * and apply filters plus keyset direction before LIMIT (pageSize + 1). */
   readonly mode: "offline" | "read_only" | "not_configured";
   listPublished(query: SourceQuery): Promise<SourcePage<PublicCatalogBundle>>;
   getPublishedBySlug(slug: string): Promise<PublicCatalogBundle | null>;
   listAdmin(query: SourceQuery): Promise<SourcePage<PrivateCatalogBundle>>;
   getAdminByCode(code: string): Promise<PrivateCatalogBundle | null>;
+  /** Optional for older B1 sources; a connected Admin filter needs a bounded implementation. */
+  listAdminPrimaryCategoryOptions?(): Promise<AdminCategoryOptions>;
 }
-export type CatalogPage<T> = Readonly<{ items: readonly T[]; nextCursor: string | null }>;
+export type CatalogPage<T> = Readonly<{ items: readonly T[]; nextCursor: string | null;
+  previousCursor?: string | null }>;

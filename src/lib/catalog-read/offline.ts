@@ -44,10 +44,13 @@ export function projectPublicCatalogBundle(bundle: PrivateCatalogBundle): Public
   return { [PUBLIC_CATALOG_PROJECTION]: true, product, variants, categories, categoryLinks, images, translations };
 }
 
-function compareAdmin(a: PrivateCatalogBundle, b: PrivateCatalogBundle): number {
-  if (a.product.updated_at !== b.product.updated_at)
-    return a.product.updated_at > b.product.updated_at ? -1 : 1;
-  return a.product.id.localeCompare(b.product.id);
+const compareText = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+function compareAdmin(a: PrivateCatalogBundle, b: PrivateCatalogBundle, query: SourceQuery): number {
+  const codeSort = query.sort === "product_code_asc" || query.sort === "product_code_desc";
+  const left = codeSort ? a.product.product_code : a.product.updated_at;
+  const right = codeSort ? b.product.product_code : b.product.updated_at;
+  const direction = query.sort === "updated_asc" || query.sort === "product_code_asc" ? 1 : -1;
+  return direction * compareText(left, right) || compareText(a.product.id, b.product.id);
 }
 function comparePublic(a: PublicCatalogBundle, b: PublicCatalogBundle, query: SourceQuery): number {
   if (query.sort === "featured" && a.product.featured !== b.product.featured)
@@ -57,12 +60,29 @@ function comparePublic(a: PublicCatalogBundle, b: PublicCatalogBundle, query: So
   return a.product.id.localeCompare(b.product.id);
 }
 function pageAdmin(rows: readonly PrivateCatalogBundle[], query: SourceQuery) {
-  const cursor = query.cursor ? decodeCursor(query.cursor, "admin", query) : null;
-  const after = cursor ? rows.findIndex((row) =>
-    row.product.updated_at < cursor.timestamp ||
-    row.product.updated_at === cursor.timestamp && row.product.id > cursor.id) : 0;
+  if (query.cursor && !query.adminCursorBoundary) throw new CatalogReadError("INVALID_INPUT");
+  const cursor = query.adminCursorBoundary ?? null;
+  const compareToCursor = (row: PrivateCatalogBundle) => {
+    if (!cursor) return 0;
+    const codeSort = query.sort === "product_code_asc" || query.sort === "product_code_desc";
+    const value = codeSort ? row.product.product_code : row.product.updated_at;
+    const boundary = codeSort ? cursor.productCode! : cursor.timestamp!;
+    const direction = query.sort === "updated_asc" || query.sort === "product_code_asc" ? 1 : -1;
+    return direction * compareText(value, boundary) || compareText(row.product.id, cursor.id);
+  };
+  if (query.direction === "before" && cursor) {
+    const at = rows.findIndex((row) => compareToCursor(row) >= 0);
+    const end = at < 0 ? rows.length : at;
+    const start = Math.max(0, end - query.limit);
+    const page = rows.slice(start, end);
+    return { rows: page, hasMore: page.length > 0 && end < rows.length,
+      hasPrevious: page.length > 0 && start > 0 };
+  }
+  const after = cursor ? rows.findIndex((row) => compareToCursor(row) > 0) : 0;
   const start = cursor ? (after < 0 ? rows.length : after) : 0;
-  return { rows: rows.slice(start, start + query.limit), hasMore: start + query.limit < rows.length };
+  const page = rows.slice(start, start + query.limit);
+  return { rows: page, hasMore: start + query.limit < rows.length,
+    hasPrevious: page.length > 0 && start > 0 };
 }
 function pagePublic(rows: readonly PublicCatalogBundle[], query: SourceQuery) {
   const cursor = query.cursor ? decodeCursor(query.cursor, "public", query) : null;
@@ -99,11 +119,30 @@ export function createOfflineCatalogSource(fixtures: readonly PrivateCatalogBund
       const rows = fixtures.filter((bundle) =>
         (!query.status || bundle.product.status === query.status) &&
         (!query.productType || bundle.product.product_type === query.productType) &&
-        (!query.categoryId || bundle.categoryLinks.some((link) => link.category_id === query.categoryId)))
-        .sort(compareAdmin);
+        (!query.categoryId || bundle.categoryLinks.some((link) => link.category_id === query.categoryId)) &&
+        (!query.primaryCategoryId || bundle.categoryLinks.some((link) =>
+          link.is_primary && link.category_id === query.primaryCategoryId)) &&
+        (!query.search || bundle.product.product_code.toLowerCase().includes(query.search) ||
+          bundle.translations.some((translation) =>
+            (translation.locale === "en" || translation.locale === "zh") &&
+            translation.name.toLowerCase().includes(query.search!))))
+        .sort((a, b) => compareAdmin(a, b, query));
       return pageAdmin(rows, query);
     },
     async getAdminByCode(code) { return fixtures.find((bundle) => bundle.product.product_code === code) ?? null; },
+    async listAdminPrimaryCategoryOptions() {
+      const options = new Map<string, { id: string; nameEn: string; nameZh: string }>();
+      for (const bundle of fixtures) for (const link of bundle.categoryLinks) {
+        if (!link.is_primary || link.product_id !== bundle.product.id) continue;
+        const category = bundle.categories.find((item) => item.id === link.category_id);
+        if (category) options.set(category.id, {
+          id: category.id, nameEn: category.name_en, nameZh: category.name_zh,
+        });
+      }
+      const sorted = [...options.values()].sort((a, b) =>
+        compareText(a.nameEn, b.nameEn) || compareText(a.id, b.id));
+      return { items: sorted.slice(0, 50), hasMore: sorted.length > 50 };
+    },
   };
 }
 
@@ -113,4 +152,5 @@ export const notConfiguredCatalogSource: CatalogReadSource = {
   async getPublishedBySlug() { return null; },
   async listAdmin() { return { rows: [], hasMore: false }; },
   async getAdminByCode() { return null; },
+  async listAdminPrimaryCategoryOptions() { return { items: [], hasMore: false }; },
 };

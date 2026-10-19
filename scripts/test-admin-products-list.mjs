@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { createCatalogReadRepository } from "../src/lib/catalog-read/repository-core.ts";
+import { createAdminCursorCodec } from "../src/lib/catalog-read/admin-cursor.ts";
 import { createOfflineCatalogSource, notConfiguredCatalogSource } from "../src/lib/catalog-read/offline.ts";
 import { loadAdminProductsList } from "../src/lib/admin/products-list-state.ts";
 
@@ -37,7 +39,8 @@ const dependencies = {
   directory: { async findByProviderIdentity(identity) { return identity.provider_subject === "active"
     ? account : identity.provider_subject === "no-grant" ? { ...account, provider_subject: "no-grant", permissions: [] } : null; } },
 };
-const repo = (source, session = "active") => createCatalogReadRepository(source, { session, dependencies });
+const cursorCodec = createAdminCursorCodec(randomBytes(32).toString("base64url"));
+const repo = (source, session = "active") => createCatalogReadRepository(source, { session, dependencies }, cursorCodec);
 const bundle = (n, status) => {
   const productId = id(n);
   return { product: { id: productId, product_code: `FAMILY-${n}`, slug: `family-${n}`,
@@ -101,7 +104,8 @@ test("default page uses trusted server wiring with no query-controlled source sw
   assert.match(page, /error\.code === "FORBIDDEN"\) redirect\("\/admin\/login\?error=1"\)/);
   assert.match(server, /^import "server-only";/);
   assert.match(server, /notConfiguredCatalogSource/);
-  assert.doesNotMatch(page + server, /searchParams|ADMIN_UI_FIXTURE|TEST_DATA|request\.url|process\.env/);
+  assert.match(page, /parseAdminProductsUrl\(await searchParams\)/);
+  assert.doesNotMatch(page + server, /ADMIN_UI_FIXTURE|TEST_DATA|request\.url|process\.env/);
   assert.match(loading, /state="loading"/);
   assert.match(render({ state: "loading" }), /Loading products/);
 });

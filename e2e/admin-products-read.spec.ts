@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -45,6 +46,7 @@ const catalogFixture = `
 import "server-only";
 import { cookies } from "next/headers";
 import { createCatalogReadRepository } from "./repository-core.ts";
+import { createAdminCursorCodec } from "./admin-cursor.ts";
 import { createOfflineCatalogSource, notConfiguredCatalogSource } from "./offline.ts";
 import type { PrivateCatalogBundle } from "./types.ts";
 const date = "2026-10-01T00:00:00.000Z";
@@ -58,17 +60,34 @@ function row(n: number, status: "draft" | "published" | "retired"): PrivateCatal
     created_at: date, updated_at: date },
     translations: [{ product_id: productId, locale: "en", name: \`Family \${n}\`,
       short_description: "", description: "", seo_title: "", seo_description: "",
+      created_at: date, updated_at: date },
+      { product_id: productId, locale: "zh", name: \`家族 \${n}\`,
+      short_description: "", description: "", seo_title: "", seo_description: "",
       created_at: date, updated_at: date }],
     variants: [{ id: id(n + 100), product_id: productId, sku: \`SKU-\${n + 100}\`, status,
       attributes: {}, moq_quantity: "100", moq_unit: "pieces", order_multiple: null,
       package_quantity: null, package_unit: null, reference_price: null,
       reference_currency: null, sort_order: 0, created_at: date, updated_at: date }],
-    categoryLinks: [], categories: [], images: [{ id: id(n + 200), product_id: productId,
+    categoryLinks: [{ product_id: productId, category_id: id(n <= 3 ? 701 : 702),
+      is_primary: true, sort_order: 0, created_at: date, updated_at: date },
+      ...(n === 1 ? [{ product_id: productId, category_id: id(702),
+        is_primary: false, sort_order: 1, created_at: date, updated_at: date }] : [])],
+    categories: [701, 702].map((number) => ({ id: id(number), parent_id: null,
+      slug: number === 701 ? "nails" : "care", status: "published" as const,
+      name_en: number === 701 ? "Nails" : "Care", name_zh: number === 701 ? "美甲" : "护理",
+      description_en: "", description_zh: "", sort_order: number,
+      created_at: date, updated_at: date })),
+    images: [{ id: id(n + 200), product_id: productId,
       variant_id: null, storage_key: "private/fixture.webp", public_url: "https://example.invalid/image.webp",
       role: "primary", status, sort_order: 0, width: null, height: null, format: "webp",
       alt_en: "", alt_zh: "", created_at: date, updated_at: date }] };
 }
 const sample = createOfflineCatalogSource([row(1, "draft"), row(2, "published"), row(3, "retired")]);
+const querySample = createOfflineCatalogSource(Array.from({ length: 45 }, (_, index) =>
+  row(index + 1, index % 3 === 0 ? "draft" : index % 3 === 1 ? "published" : "retired")));
+const legacyOptions = { mode: "offline" as const, listAdmin: sample.listAdmin,
+  getAdminByCode: sample.getAdminByCode, listPublished: sample.listPublished,
+  getPublishedBySlug: sample.getPublishedBySlug };
 const empty = createOfflineCatalogSource([]);
 const failed = { mode: "offline" as const,
   async listAdmin(): Promise<never> { throw Error("postgres://secret.invalid"); },
@@ -79,7 +98,8 @@ export async function createServerCatalogReadRepository() {
   const cookieStore = await cookies();
   const role = cookieStore.get("admin-ui-fixture")?.value;
   const state = cookieStore.get("catalog-read-fixture")?.value;
-  const source = state === "success" ? sample : state === "empty" ? empty :
+  const source = state === "success" ? sample : state === "query" ? querySample :
+    state === "legacy-options" ? legacyOptions : state === "empty" ? empty :
     state === "error" ? failed : notConfiguredCatalogSource;
   return createCatalogReadRepository(source, {
     session: role,
@@ -94,7 +114,7 @@ export async function createServerCatalogReadRepository() {
           permissions: state === "forbidden" ? [] : ["catalog.read"] };
       } },
     },
-  });
+  }, createAdminCursorCodec(process.env.ADMIN_CATALOG_CURSOR_SIGNING_KEY ?? ""));
 }
 `;
 
@@ -119,18 +139,18 @@ async function startFixture() {
   writeFileSync(join(fixtureRoot, "src/lib/admin/server-access.ts"), accessFixture);
   writeFileSync(join(fixtureRoot, "src/lib/admin/ui-identity.ts"), identityFixture);
   writeFileSync(join(fixtureRoot, "src/lib/catalog-read/server.ts"), catalogFixture);
-  const pagePath = join(fixtureRoot, "src/app/admin/(workspace)/products/page.tsx");
-  const pageSource = readFileSync(pagePath, "utf8");
-  const original = "hasNextPage={result.kind === \"success\" && result.hasNextPage} />";
-  if (!pageSource.includes(original)) throw Error("Admin products fixture no longer matches the production page");
-  writeFileSync(pagePath, pageSource.replace(original, 'hasNextPage={result.kind === "success" && result.hasNextPage} testData={result.kind === "success"} />'));
+  const panelPath = join(fixtureRoot, "src/components/admin/product-list-panel.tsx");
+  const panelSource = readFileSync(panelPath, "utf8");
+  if (!panelSource.includes("testData = false")) throw Error("Admin products fixture no longer matches the list panel");
+  writeFileSync(panelPath, panelSource.replace("testData = false", "testData = true"));
 
   fixtureOrigin = `http://127.0.0.1:${await unusedPort()}`;
   fixtureServer = spawn(process.execPath, [join(dependencies, "next/dist/bin/next"), "dev", "--webpack",
     "--hostname", "127.0.0.1", "--port", new URL(fixtureOrigin).port], {
     cwd: fixtureRoot,
     env: { ...process.env, NEXT_PUBLIC_SUPABASE_URL: "", NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "",
-      ADMIN_DIRECTORY_DATABASE_URL: "", DATABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "" },
+      ADMIN_DIRECTORY_DATABASE_URL: "", DATABASE_URL: "", SUPABASE_SERVICE_ROLE_KEY: "",
+      ADMIN_CATALOG_CURSOR_SIGNING_KEY: randomBytes(32).toString("base64url") },
     stdio: "ignore",
   });
   const deadline = Date.now() + 110_000;
@@ -218,4 +238,117 @@ test("mobile table scrolls inside panel without document overflow", async ({ pag
   await expect(page.getByRole("dialog", { name: "Admin menu" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Admin menu" })).toBeHidden();
+});
+
+test("server query controls search, status, primary category and sorting", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products`);
+  await page.getByRole("searchbox", { name: "Search products" }).fill("  family-45  ");
+  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await expect(page.getByRole("link", { name: "FAMILY-45" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "FAMILY-1", exact: true })).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("q")?.trim()).toBe("family-45");
+
+  await page.getByRole("link", { name: "Clear Filters" }).click();
+  await page.getByLabel("Status", { exact: true }).selectOption("draft");
+  await page.getByLabel("Primary category").selectOption("00000701-0000-4000-8000-000000000000");
+  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await expect(page.getByRole("link", { name: "FAMILY-1", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "FAMILY-2", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "FAMILY-4", exact: true })).toHaveCount(0);
+
+  await page.getByLabel("Primary category").selectOption("00000702-0000-4000-8000-000000000000");
+  await page.getByRole("searchbox", { name: "Search products" }).fill("family-1");
+  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await expect(page.getByRole("link", { name: "FAMILY-1", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "FAMILY-10", exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: "Clear Filters" }).click();
+  await page.getByLabel("Sort by").selectOption("product_code_desc");
+  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-9");
+  await expect(page.getByText("TEST DATA", { exact: true })).toBeVisible();
+});
+
+test("cursor URLs survive refresh, back and forward; filters reset the page", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products`);
+  await expect(page.getByText("Page 1", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Next" }).click();
+  await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+  const secondUrl = page.url();
+  await expect(page.getByRole("link", { name: "FAMILY-21" })).toBeVisible();
+  await page.getByRole("link", { name: "Next" }).click();
+  await expect(page.getByText("Page 3", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "FAMILY-41" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Next" })).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(secondUrl);
+  await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+  await page.goForward();
+  await expect(page.getByText("Page 3", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Previous" }).click();
+  await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("direction")).toBe("before");
+  await page.reload();
+  await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+  await page.getByLabel("Status", { exact: true }).selectOption("published");
+  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await expect(page.getByText("Page 1", { exact: true })).toBeVisible();
+  expect(new URL(page.url()).searchParams.has("cursor")).toBe(false);
+});
+
+test("tampered signed cursor shows a safe query error without product data", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products`);
+  const next = await page.getByRole("link", { name: "Next" }).getAttribute("href");
+  expect(next).toBeTruthy();
+  const url = new URL(next!, fixtureOrigin);
+  const token = url.searchParams.get("cursor")!;
+  const [payload, signature] = token.split(".");
+  const fields = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  fields[5] = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+  url.searchParams.set("cursor", `${Buffer.from(JSON.stringify(fields)).toString("base64url")}.${signature}`);
+  await page.goto(url.toString());
+  await expect(page.getByText("Invalid product query")).toBeVisible();
+  await expect(page.getByRole("link", { name: "FAMILY-21" })).toHaveCount(0);
+  url.searchParams.set("cursor", token);
+  url.searchParams.set("direction", "before");
+  url.searchParams.set("ADMIN_CATALOG_CURSOR_SIGNING_KEY", "attacker-value");
+  await page.goto(url.toString());
+  await expect(page.getByText("Invalid product query")).toBeVisible();
+});
+
+test("invalid query and unmatched filters show safe, distinct states", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products?status=admin`);
+  await expect(page.getByText("Invalid product query")).toBeVisible();
+  await expect(page.getByRole("link", { name: "FAMILY-1" })).toHaveCount(0);
+  await page.goto(`${fixtureOrigin}/admin/products?q=does-not-exist`);
+  await expect(page.getByText("No Matching Products")).toBeVisible();
+  await expect(page.getByText("No Products", { exact: true })).toHaveCount(0);
+});
+
+test("a legacy source without category options keeps the bounded list available", async ({ page, context }) => {
+  await fixtureCookies(context, "legacy-options");
+  await page.goto(`${fixtureOrigin}/admin/products`);
+  await expect(page.getByRole("link", { name: "FAMILY-1" })).toBeVisible();
+  await expect(page.getByText("Primary category options are not connected.")).toBeVisible();
+  await expect(page.getByText("TEST DATA", { exact: true })).toBeVisible();
+});
+
+test("responsive filters preserve document width and mobile dialog focus", async ({ page, context }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile-chrome", "Mobile viewport only");
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products`);
+  await expect(page.getByRole("searchbox", { name: "Search products" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "Open admin menu" }).click();
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => document.activeElement?.closest("dialog") !== null)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Admin menu" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Open admin menu" })).toBeFocused();
+  await page.setViewportSize({ width: 768, height: 900 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

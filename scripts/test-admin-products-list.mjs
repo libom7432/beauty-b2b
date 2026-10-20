@@ -143,7 +143,9 @@ test("default page uses trusted server wiring with no query-controlled source sw
   assert.match(server, /^import "server-only";/);
   assert.match(server, /notConfiguredCatalogSource/);
   assert.match(page, /parseAdminProductsUrl\(await searchParams\)/);
-  assert.doesNotMatch(page + server, /ADMIN_UI_FIXTURE|TEST_DATA|request\.url|process\.env/);
+  assert.doesNotMatch(page, /ADMIN_UI_FIXTURE|TEST_DATA|request\.url|process\.env/);
+  assert.doesNotMatch(server, /ADMIN_UI_FIXTURE|TEST_DATA|request\.url/);
+  assert.match(server, /process\.env\.CATALOG_READ_SOURCE === "supabase" && process\.env\.NODE_ENV === "production"/);
   assert.match(loading, /state="loading"/);
   assert.match(render({ state: "loading" }), /Loading products/);
 });

@@ -3,7 +3,7 @@ import { AdminBadge, AdminEmptyState, AdminErrorState, AdminLoadingState, AdminT
 import type { AdminCategoryOptions, AdminProductListDTO } from "@/lib/catalog-read/types";
 import type { AdminProductsUrlQuery } from "@/lib/admin/products-query";
 import { adminProductsHref } from "@/lib/admin/products-query";
-import { adminProductDetailHref } from "@/lib/admin/product-detail-navigation";
+import { adminProductIdDetailHref } from "@/lib/admin/product-detail-navigation";
 
 export type ProductListState = "not_connected" | "loading" | "empty" | "no_matches" |
   "success" | "source_unavailable" | "invalid_query";
@@ -46,7 +46,7 @@ export function ProductListPanel({ state, products = [], query, categories, cate
     </form>}
     <AdminTable caption="Catalog products" headings={["Product Code", "Product Name", "Product Type", "Status", "Primary Category", "Variants", "Updated At"]}>
       {rows.map((row) => <tr key={row.productCode}>
-        <td><Link className="admin-inline-link" href={adminProductDetailHref(row.productCode,
+        <td><Link className="admin-inline-link" href={adminProductIdDetailHref(row.id,
           query ? adminProductsHref(query, query.cursor, query.direction, query.page) : "/admin/products")}>{row.productCode}</Link></td>
         <td>{row.name.state === "available" ? shown(row.name.value) : "Unavailable"}</td>
         <td>{shown(row.productType)}</td><td><AdminBadge tone={row.status === "published" ? "positive" : row.status === "draft" ? "warning" : "neutral"}>{row.status}</AdminBadge></td>

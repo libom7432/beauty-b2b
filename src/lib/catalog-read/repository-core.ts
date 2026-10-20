@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { requireCatalogPermission, type CatalogAuthDependencies } from "../catalog-import/admin-auth.ts";
 import { CatalogReadError } from "./errors.ts";
+import { isReadableProductCode } from "./product-code.ts";
 import { toAdminDetail, toAdminList, toPublic } from "./mapping.ts";
-import type { AdminCursorCodec } from "./admin-cursor.ts";
+import { ADMIN_UUID, type AdminCursorCodec } from "./admin-cursor.ts";
 import type { AdminCategoryOptions, AdminProductDetailDTO, AdminProductListDTO, PrivateCatalogBundle, PublicCatalogBundle,
   CatalogListQuery, CatalogPage, CatalogReadSource, CatalogScope, CatalogSort, PublicProductDTO,
   SourcePage, SourceQuery } from "./types.ts";
@@ -19,6 +21,8 @@ const fingerprint = (query: SourceQuery, scope: CatalogScope) => {
   return JSON.stringify(scope === "admin" && (query.primaryCategoryId || query.search)
     ? [...legacy, query.primaryCategoryId ?? null, query.search ?? null] : legacy);
 };
+export const adminCursorQueryFingerprint = (query: SourceQuery): string =>
+  createHash("sha256").update(fingerprint(query, "admin"), "utf8").digest("hex");
 export function decodeCursor(value: string, scope: CatalogScope, query: SourceQuery): Cursor {
   if (scope !== "public") return failInput();
   if (value.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(value)) return failInput();
@@ -38,12 +42,8 @@ export function encodeCursor(bundle: PrivateCatalogBundle | PublicCatalogBundle,
   direction: "after" | "before" = "after"): string {
   const timestamp = scope === "admin" && "updated_at" in bundle.product ? bundle.product.updated_at : bundle.product.published_at;
   if (scope === "admin") {
-    if (!adminCursorCodec || !("product_code" in bundle.product)) throw new CatalogReadError("NOT_CONFIGURED");
-    return adminCursorCodec.issue({ sort: query.sort, filter: fingerprint(query, scope), direction }, {
-      id: bundle.product.id,
-      timestamp: query.sort.startsWith("product_code_") ? null : timestamp,
-      productCode: query.sort.startsWith("product_code_") ? bundle.product.product_code : null,
-    });
+    if (!adminCursorCodec || !("updated_at" in bundle.product)) throw new CatalogReadError("NOT_CONFIGURED");
+    return adminCursorCodec.issue({ sort: query.sort, filter: adminCursorQueryFingerprint(query), direction }, bundle.product);
   }
   if (!timestamp || !Number.isFinite(Date.parse(timestamp))) throw new CatalogReadError("INTERNAL_ERROR");
   const cursor: Cursor = { v: 1, scope, sort: query.sort, filter: fingerprint(query, scope), id: bundle.product.id,
@@ -83,8 +83,8 @@ export function normalizeCatalogListQuery(scope: CatalogScope, raw: CatalogListQ
     return query;
   }
   if (!adminCursorCodec) throw new CatalogReadError("NOT_CONFIGURED");
-  return { ...query, adminCursorBoundary: adminCursorCodec.verify(query.cursor, {
-    sort: query.sort, filter: fingerprint(query, scope), direction: query.direction,
+  return { ...query, adminCursorReference: adminCursorCodec.verify(query.cursor, {
+    sort: query.sort, filter: adminCursorQueryFingerprint(query), direction: query.direction,
   }) };
 }
 async function safeSource<T>(task: () => Promise<T>): Promise<T> {
@@ -99,6 +99,7 @@ export interface CatalogReadRepository {
   getPublishedProductBySlug(slug: string): Promise<PublicProductDTO>;
   listAdminProducts(query?: CatalogListQuery): Promise<CatalogPage<AdminProductListDTO>>;
   getAdminProductByCode(code: string): Promise<AdminProductDetailDTO>;
+  getAdminProductById(id: string): Promise<AdminProductDetailDTO>;
   listAdminPrimaryCategoryOptions(): Promise<AdminCategoryOptions>;
 }
 /** Pure core for offline tests. Production wiring must stay in a server-only module. */
@@ -147,9 +148,18 @@ export function createCatalogReadRepository(source: CatalogReadSource, admin: Re
     },
     async getAdminProductByCode(code) {
       await authorize();
-      if (!codePattern.test(code)) return failInput();
+      if (!isReadableProductCode(code)) return failInput();
       configured();
       const bundle = await safeSource(() => source.getAdminByCode(code));
+      if (!bundle) throw new CatalogReadError("NOT_FOUND");
+      return toAdminDetail(bundle);
+    },
+    async getAdminProductById(id) {
+      await authorize();
+      if (!ADMIN_UUID.test(id)) return failInput();
+      configured();
+      if (!source.getAdminById) throw new CatalogReadError("NOT_CONFIGURED");
+      const bundle = await safeSource(() => source.getAdminById!(id));
       if (!bundle) throw new CatalogReadError("NOT_FOUND");
       return toAdminDetail(bundle);
     },

@@ -1,5 +1,6 @@
 import { CatalogReadError } from "../catalog-read/errors.ts";
 import { normalizeCatalogListQuery } from "../catalog-read/repository-core.ts";
+import { MAX_ADMIN_CURSOR_LENGTH } from "../catalog-read/product-code.ts";
 import type { CatalogListQuery, CatalogStatus } from "../catalog-read/types.ts";
 
 export type AdminProductsUrlQuery = Readonly<{
@@ -44,7 +45,7 @@ export function parseAdminProductsUrl(raw: RawParams): AdminProductsUrlQuery {
     direction: direction as "after" | "before",
   };
   // Validate filter shape here; the Repository verifies the signed cursor before source access.
-  if (cursor && (cursor.length > 1024 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(cursor)))
+  if (cursor && (cursor.length > MAX_ADMIN_CURSOR_LENGTH || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(cursor)))
     throw new CatalogReadError("INVALID_INPUT");
   normalizeCatalogListQuery("admin", { ...repositoryQuery, cursor: undefined, direction: "after" });
   return { search, status: status as AdminProductsUrlQuery["status"], category,

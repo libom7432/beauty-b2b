@@ -97,7 +97,7 @@ export type SourceQuery = Readonly<{ limit: number; cursor: string | null; sort:
   search?: string; status?: CatalogStatus; direction: "after" | "before";
   /** Verified by the Repository before an Admin source is called. Admin adapters must
    * use this boundary, never parse the raw cursor or accept a client boundary. */
-  adminCursorBoundary?: import("./admin-cursor.ts").AdminCursorBoundary }>;
+  adminCursorReference?: import("./admin-cursor.ts").AdminCursorReference }>;
 export type SourcePage<T> = Readonly<{ rows: readonly T[]; hasMore: boolean; hasPrevious?: boolean }>;
 export type AdminCategoryOption = Readonly<{ id: string; nameEn: string; nameZh: string }>;
 export type AdminCategoryOptions = Readonly<{ items: readonly AdminCategoryOption[]; hasMore: boolean }>;
@@ -110,6 +110,8 @@ export interface CatalogReadSource {
   getPublishedBySlug(slug: string): Promise<PublicCatalogBundle | null>;
   listAdmin(query: SourceQuery): Promise<SourcePage<PrivateCatalogBundle>>;
   getAdminByCode(code: string): Promise<PrivateCatalogBundle | null>;
+  /** Optional for older B1 sources; UUID lookup must be bounded and read-only. */
+  getAdminById?(id: string): Promise<PrivateCatalogBundle | null>;
   /** Optional for older B1 sources; a connected Admin filter needs a bounded implementation. */
   listAdminPrimaryCategoryOptions?(): Promise<AdminCategoryOptions>;
 }

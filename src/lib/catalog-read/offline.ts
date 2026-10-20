@@ -1,4 +1,5 @@
 import { decodeCursor } from "./repository-core.ts";
+import { adminBoundaryWitness, type AdminCursorBoundary } from "./admin-cursor.ts";
 import { CatalogReadError } from "./errors.ts";
 import { PUBLIC_CATALOG_PROJECTION } from "./types.ts";
 import type { CatalogReadSource, PrivateCatalogBundle, PublicCatalogBundle, SourceQuery } from "./types.ts";
@@ -60,8 +61,15 @@ function comparePublic(a: PublicCatalogBundle, b: PublicCatalogBundle, query: So
   return a.product.id.localeCompare(b.product.id);
 }
 function pageAdmin(rows: readonly PrivateCatalogBundle[], query: SourceQuery) {
-  if (query.cursor && !query.adminCursorBoundary) throw new CatalogReadError("INVALID_INPUT");
-  const cursor = query.adminCursorBoundary ?? null;
+  if (query.cursor && !query.adminCursorReference) throw new CatalogReadError("INVALID_INPUT");
+  const reference = query.adminCursorReference;
+  const matched = reference ? rows.find((row) => row.product.id.toLowerCase() === reference.id.toLowerCase()) : null;
+  if (reference && (!matched || adminBoundaryWitness(matched.product) !== reference.witness))
+    throw new CatalogReadError("INVALID_INPUT");
+  const cursor: AdminCursorBoundary | null = matched ? {
+    id: matched.product.id, timestamp: matched.product.updated_at,
+    productCode: matched.product.product_code,
+  } : null;
   const compareToCursor = (row: PrivateCatalogBundle) => {
     if (!cursor) return 0;
     const codeSort = query.sort === "product_code_asc" || query.sort === "product_code_desc";
@@ -130,6 +138,7 @@ export function createOfflineCatalogSource(fixtures: readonly PrivateCatalogBund
       return pageAdmin(rows, query);
     },
     async getAdminByCode(code) { return fixtures.find((bundle) => bundle.product.product_code === code) ?? null; },
+    async getAdminById(id) { return fixtures.find((bundle) => bundle.product.id.toLowerCase() === id.toLowerCase()) ?? null; },
     async listAdminPrimaryCategoryOptions() {
       const options = new Map<string, { id: string; nameEn: string; nameZh: string }>();
       for (const bundle of fixtures) for (const link of bundle.categoryLinks) {
@@ -152,5 +161,6 @@ export const notConfiguredCatalogSource: CatalogReadSource = {
   async getPublishedBySlug() { return null; },
   async listAdmin() { return { rows: [], hasMore: false }; },
   async getAdminByCode() { return null; },
+  async getAdminById() { return null; },
   async listAdminPrimaryCategoryOptions() { return { items: [], hasMore: false }; },
 };

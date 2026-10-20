@@ -23,3 +23,20 @@ export async function loadAdminProductDetail(
     return { kind: "source_unavailable" };
   }
 }
+
+/** UUID route shares the B3 view model and error states. */
+export async function loadAdminProductDetailById(
+  repository: Pick<CatalogReadRepository, "getAdminProductById">,
+  productId: string,
+): Promise<AdminProductDetailState> {
+  try {
+    return { kind: "success", product: await repository.getAdminProductById(productId) };
+  } catch (error) {
+    if (error instanceof CatalogReadError) {
+      if (error.code === "FORBIDDEN" || error.code === "INVALID_INPUT") throw error;
+      if (error.code === "NOT_CONFIGURED") return { kind: "not_connected" };
+      if (error.code === "NOT_FOUND") return { kind: "not_found" };
+    }
+    return { kind: "source_unavailable" };
+  }
+}

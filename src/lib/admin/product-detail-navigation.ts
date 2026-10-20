@@ -1,5 +1,7 @@
 import { CatalogReadError } from "../catalog-read/errors.ts";
 import { adminProductsHref, parseAdminProductsUrl } from "./products-query.ts";
+import { encodeProductCodeSegment } from "./product-code-route.ts";
+import { ADMIN_UUID } from "../catalog-read/admin-cursor.ts";
 
 const defaultHref = "/admin/products";
 
@@ -27,6 +29,16 @@ export function safeProductsReturnHref(value: string | string[] | undefined): st
 }
 
 export function adminProductDetailHref(productCode: string, listHref: string): string {
-  const pathname = `/admin/products/${encodeURIComponent(productCode)}`;
+  const pathname = /^[A-Za-z0-9][A-Za-z0-9._~-]*$/.test(productCode)
+    ? `/admin/products/${encodeURIComponent(productCode)}`
+    : `/admin/products/by-code/${encodeProductCodeSegment(productCode)}`;
   return listHref === defaultHref ? pathname : `${pathname}?returnTo=${encodeURIComponent(listHref)}`;
+}
+
+/** Short, stable Admin locator. Product Code remains the displayed business identity. */
+export function adminProductIdDetailHref(productId: string, listHref: string): string {
+  if (!ADMIN_UUID.test(productId)) throw new CatalogReadError("INVALID_INPUT");
+  const pathname = `/admin/products/id/${productId.toLowerCase()}`;
+  const safeReturn = safeProductsReturnHref(listHref);
+  return safeReturn === defaultHref ? pathname : `${pathname}?returnTo=${encodeURIComponent(safeReturn)}`;
 }

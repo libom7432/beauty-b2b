@@ -96,13 +96,34 @@ function row(n: number, status: "draft" | "published" | "retired"): PrivateCatal
 const sample = createOfflineCatalogSource([row(1, "draft"), row(2, "published"), row(3, "retired")]);
 const querySample = createOfflineCatalogSource(Array.from({ length: 45 }, (_, index) =>
   row(index + 1, index % 3 === 0 ? "draft" : index % 3 === 1 ? "published" : "retired")));
+const specialSample = createOfflineCatalogSource(Array.from({ length: 22 }, (_, index) => {
+  const bundle = row(index + 1, "published");
+  return { ...bundle, product: { ...bundle.product,
+    product_code: ["CN-甲", "A/B", "A B", "A!"][index] ?? bundle.product.product_code } };
+}));
+const lengths = [128, 256, 512, 1024, 2048, 4096, 8192, 32768];
+const lengthSample = createOfflineCatalogSource(lengths.flatMap((length, index) =>
+  ["A".repeat(length), "甲".repeat(length)].map((code, kind) => {
+    const bundle = row(100 + index * 2 + kind, "draft");
+    return { ...bundle, product: { ...bundle.product, product_code: code } };
+  })));
+const cursorSamples = new Map([128, 1024, 2048, 4096, 8192, 32768].map((length) => [
+  \`cursor-\${length}\`, createOfflineCatalogSource(Array.from({ length: 21 }, (_, index) => {
+    const bundle = row(index + 1, "draft");
+    const code = index < 19 ? \`A\${String(index).padStart(2, "0")}\` :
+      index === 19 ? "甲".repeat(length) : "龥";
+    return { ...bundle, product: { ...bundle.product, product_code: code } };
+  })),
+]));
 const legacyOptions = { mode: "offline" as const, listAdmin: sample.listAdmin,
-  getAdminByCode: sample.getAdminByCode, listPublished: sample.listPublished,
+  getAdminByCode: sample.getAdminByCode, getAdminById: sample.getAdminById,
+  listPublished: sample.listPublished,
   getPublishedBySlug: sample.getPublishedBySlug };
 const empty = createOfflineCatalogSource([]);
 const failed = { mode: "offline" as const,
   async listAdmin(): Promise<never> { throw Error("postgres://secret.invalid"); },
   async getAdminByCode(): Promise<never> { throw Error("postgres://secret.invalid"); },
+  async getAdminById(): Promise<never> { throw Error("postgres://secret.invalid"); },
   async listPublished() { return { rows: [], hasMore: false }; },
   async getPublishedBySlug() { return null; } };
 export async function createServerCatalogReadRepository() {
@@ -110,8 +131,10 @@ export async function createServerCatalogReadRepository() {
   const role = cookieStore.get("admin-ui-fixture")?.value;
   const state = cookieStore.get("catalog-read-fixture")?.value;
   const source = state === "success" ? sample : state === "query" ? querySample :
-    state === "legacy-options" ? legacyOptions : state === "empty" ? empty :
-    state === "error" ? failed : notConfiguredCatalogSource;
+    state === "special" ? specialSample : state === "length" ? lengthSample :
+    (cursorSamples.get(state ?? "") ??
+      (state === "legacy-options" ? legacyOptions : state === "empty" ? empty :
+        state === "error" ? failed : notConfiguredCatalogSource));
   return createCatalogReadRepository(source, {
     session: role,
     dependencies: {

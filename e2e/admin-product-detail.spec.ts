@@ -9,7 +9,7 @@ test("Product Code opens a read-only detail with distinct Variant SKUs and DTO f
   await fixtureCookies(context, "success");
   await page.goto(`${fixtureOrigin}/admin/products`);
   await page.getByRole("link", { name: "FAMILY-2" }).click();
-  await expect(page).toHaveURL(/\/admin\/products\/FAMILY-2$/);
+  await expect(page).toHaveURL(/\/admin\/products\/id\/00000002-0000-4000-8000-000000000000$/);
   await expect(page.getByRole("heading", { name: "Basic Information" })).toBeVisible();
   await expect(page.getByText("FAMILY-2", { exact: true })).toBeVisible();
   await expect(page.getByText("Family 2", { exact: true }).first()).toBeVisible();
@@ -32,6 +32,27 @@ test("Product Code opens a read-only detail with distinct Variant SKUs and DTO f
     "https://example.invalid/image.webp", "https://example.invalid/variant.webp"])
     expect(rendered).not.toContain(privateValue);
   await expect(page.getByRole("button", { name: /edit|delete|publish|upload/i })).toHaveCount(0);
+});
+
+test("Unicode and slash Product Codes round-trip through the isolated detail route", async ({ page, context }) => {
+  await fixtureCookies(context, "special");
+  await page.goto(`${fixtureOrigin}/admin/products?status=published&sort=product_code_asc`);
+  for (const code of ["CN-甲", "A/B", "A B", "A!"]) {
+    await page.getByRole("link", { name: code, exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/products\/id\/[0-9a-f-]+/);
+    await expect(page.getByText(code, { exact: true }).first()).toBeVisible();
+    const html = await page.content();
+    expect(html).not.toContain("private/fixture.webp");
+    expect(html).not.toContain("storageKey");
+    await page.getByRole("link", { name: "Back to Products" }).click();
+    await expect(page.getByLabel("Status", { exact: true })).toHaveValue("published");
+    await expect(page.getByLabel("Sort by", { exact: true })).toHaveValue("product_code_asc");
+  }
+  await page.getByRole("link", { name: "Next" }).click();
+  await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+  await context.clearCookies();
+  await page.goto(`${fixtureOrigin}/admin/products/by-code/${Buffer.from("A/B").toString("base64url")}`);
+  await expect(page).toHaveURL(/\/admin\/login(?:\?.*)?$/);
 });
 
 test("missing translation, absent price and missing product remain distinct", async ({ page, context }) => {

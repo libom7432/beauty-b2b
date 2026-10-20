@@ -14,11 +14,11 @@ test("isolated reader renders three statuses and a family-code detail link", asy
     await expect(page.getByRole("cell").getByText(status, { exact: true })).toHaveCount(1);
   await expect(page.getByText("TEST DATA", { exact: true })).toBeVisible();
   const code = page.getByRole("link", { name: "FAMILY-1" });
-  await expect(code).toHaveAttribute("href", "/admin/products/FAMILY-1");
+  await expect(code).toHaveAttribute("href", "/admin/products/id/00000001-0000-4000-8000-000000000000");
   await expect(page.getByText("private/fixture.webp")).toHaveCount(0);
   await expect(page.getByText("SKU-101")).toHaveCount(0);
   await code.click();
-  await expect(page).toHaveURL(/\/admin\/products\/FAMILY-1$/);
+  await expect(page).toHaveURL(/\/admin\/products\/id\/00000001-0000-4000-8000-000000000000$/);
 });
 
 test("empty, source error and default disconnected states stay distinct", async ({ page, context }) => {

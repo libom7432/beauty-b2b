@@ -9,6 +9,8 @@ import { createCatalogReadRepository } from "../src/lib/catalog-read/repository-
 import { createOfflineCatalogSource, notConfiguredCatalogSource } from "../src/lib/catalog-read/offline.ts";
 import { loadAdminProductDetail } from "../src/lib/admin/product-detail-state.ts";
 import { adminProductDetailHref, safeProductsReturnHref } from "../src/lib/admin/product-detail-navigation.ts";
+import { decodeProductCodeSegment } from "../src/lib/admin/product-code-route.ts";
+import { isReadableProductCode, MAX_PRODUCT_CODE_LENGTH } from "../src/lib/catalog-read/product-code.ts";
 import { toAdminProductDetailView } from "../src/lib/admin/product-detail-view.ts";
 
 const require = createRequire(import.meta.url);
@@ -134,7 +136,7 @@ test("not configured, not found, source unavailable and invalid input stay disti
   assert.doesNotMatch(render(ProductDetailStatePanel, { state: "source_unavailable" }), /postgres|secret\.invalid/i);
   for (const state of ["not_connected", "not_found", "source_unavailable"])
     assert.ok(render(ProductDetailStatePanel, { state }).length > 0);
-  await assert.rejects(loadAdminProductDetail(repo(failed), "../private"), { code: "INVALID_INPUT" });
+  await assert.rejects(loadAdminProductDetail(repo(failed), "A\u0000B"), { code: "INVALID_INPUT" });
 });
 
 test("anonymous and unauthorized detail reads call the source zero times", async () => {
@@ -163,6 +165,31 @@ test("return target is a validated same-site product list URL", () => {
     "/admin/products?cursor=bad&page=2", "/admin/products?status=draft&status=published",
     "/admin/products?unknown=1", `/admin/products?q=${"x".repeat(2050)}`])
     assert.equal(safeProductsReturnHref(target), "/admin/products");
+});
+
+test("existing import-compatible Product Codes are readable and use an unambiguous detail segment", async () => {
+  for (const code of ["CN-甲", "A/B", "A B", "A!", "PN-0001", "A\u0301", "a", "A",
+    "A%25", "A?B", "A#B", "A\\B", "X".repeat(MAX_PRODUCT_CODE_LENGTH),
+    "甲".repeat(MAX_PRODUCT_CODE_LENGTH)]) {
+    assert.equal(isReadableProductCode(code), true, code);
+    const source = createOfflineCatalogSource([{ ...bundle(), product: { ...bundle().product, product_code: code } }]);
+    assert.equal((await repo(source).getAdminProductByCode(code)).basic.product_code, code);
+    const href = adminProductDetailHref(code, "/admin/products?status=published");
+    assert.ok(href.startsWith("/admin/products/"));
+    assert.equal(href.includes("//"), false);
+    if (href.includes("/by-code/")) {
+      const segment = href.split("/by-code/")[1].split("?")[0];
+      assert.equal(decodeProductCodeSegment(segment), code);
+    } else assert.equal(decodeURIComponent(href.split("/products/")[1].split("?")[0]), code);
+  }
+  for (const code of ["", " A", "A ", "A\nB", "A\0B", "A\u007fB", "X".repeat(MAX_PRODUCT_CODE_LENGTH + 1)]) {
+    assert.equal(isReadableProductCode(code), false);
+    await assert.rejects(repo(createOfflineCatalogSource([bundle()])).getAdminProductByCode(code),
+      { code: "INVALID_INPUT" });
+  }
+  assert.equal(decodeProductCodeSegment("%%%"), null);
+  assert.equal(decodeProductCodeSegment("_".repeat(150_001)), null);
+  assert.equal(decodeProductCodeSegment(Buffer.from([0xff]).toString("base64url")), null);
 });
 
 test("route authorizes before Repository; Public projection remains published-only", async () => {

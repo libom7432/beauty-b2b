@@ -4,6 +4,9 @@ import test from "node:test";
 import { createCatalogReadRepository } from "../src/lib/catalog-read/repository-core.ts";
 import { createAdminCursorCodec } from "../src/lib/catalog-read/admin-cursor.ts";
 import { createOfflineCatalogSource, notConfiguredCatalogSource } from "../src/lib/catalog-read/offline.ts";
+import { parseCatalogCsvBundle } from "../src/lib/catalog-import/csv.ts";
+import { adminProductDetailHref, adminProductIdDetailHref, safeProductsReturnHref } from "../src/lib/admin/product-detail-navigation.ts";
+import { decodeProductCodeSegment } from "../src/lib/admin/product-code-route.ts";
 import { loadAdminProductsList } from "../src/lib/admin/products-list-state.ts";
 import { adminProductsHref, nextAdminProductsHref, parseAdminProductsUrl,
   previousAdminProductsHref } from "../src/lib/admin/products-query.ts";
@@ -77,6 +80,93 @@ const changePayload = (cursor, field, value) => {
   payload[field] = value;
   return `${Buffer.from(JSON.stringify(payload)).toString("base64url")}.${signature}`;
 };
+
+test("Product Code length matrix keeps import, detail, signed keyset and URL boundaries distinct", async () => {
+  const lengths = [128, 256, 512, 1024, 2048, 4096, 8192, 32_768];
+  const results = [];
+  for (const length of lengths) {
+    const samples = {
+      ascii: "A".repeat(length), chinese: "甲".repeat(length),
+      combining: "A\u0301".repeat(length / 2), slash: "A/".repeat(length / 2),
+      percent: "A%".repeat(length / 2), internalSpace: `A B${"X".repeat(length - 3)}`,
+    };
+    for (const [kind, code] of Object.entries(samples)) {
+      assert.equal(code.length, length);
+      const csv = `operation,product_code,slug,product_type,status\ncreate,${code},length-case,press_on_nails,draft\n`;
+      const imported = parseCatalogCsvBundle({ "products.csv": csv });
+      assert.equal(imported.valid, true, `${length}/${kind}: ${imported.issues.map((issue) => issue.error_code)}`);
+      const source = createOfflineCatalogSource([bundle(200, code, "draft", categoryA),
+        bundle(201, "龥", "draft", categoryA)]);
+      const reader = repo(source);
+      assert.equal((await reader.getAdminProductByCode(code)).basic.product_code, code);
+      const legacyHref = adminProductDetailHref(code, "/admin/products");
+      const segment = legacyHref.split("/by-code/")[1];
+      assert.equal(segment ? decodeProductCodeSegment(segment) :
+        decodeURIComponent(legacyHref.split("/products/")[1]), code);
+      const detailHref = adminProductIdDetailHref(id(200), "/admin/products");
+      assert.equal(detailHref, `/admin/products/id/${id(200)}`);
+      assert.equal((await reader.getAdminProductById(id(200))).basic.product_code, code);
+      const first = await reader.listAdminProducts({ sort: "product_code_asc", limit: 1 });
+      assert.deepEqual(codes(first), [code]);
+      const query = parseAdminProductsUrl({ sort: "product_code_asc" });
+      const nextHref = adminProductsHref(query, first.nextCursor, "after", 2);
+      assert.equal(parseAdminProductsUrl(params(nextHref)).cursor, first.nextCursor);
+      const second = await reader.listAdminProducts({ sort: "product_code_asc", limit: 1,
+        cursor: first.nextCursor });
+      assert.deepEqual(codes(second), ["龥"]);
+      assert.deepEqual(codes(await reader.listAdminProducts({ sort: "product_code_asc", limit: 1,
+        cursor: second.previousCursor, direction: "before" })), [code]);
+      results.push({ length, kind, utf8Bytes: Buffer.byteLength(code),
+        detailUrl: detailHref.length, cursor: first.nextCursor.length, listUrl: nextHref.length,
+        returnHref: safeProductsReturnHref(nextHref) === "/admin/products" ? "reset" : "preserved" });
+    }
+  }
+  const summary = results.filter((row) => row.kind === "ascii" || row.kind === "chinese");
+  process.stdout.write(`Product Code length matrix: ${JSON.stringify(summary)}\n`);
+  assert.equal(results.length, 48);
+  assert.ok(results.every((row) => row.returnHref === "preserved"));
+  assert.ok(results.every((row) => row.cursor <= 1024 && row.listUrl <= 1024));
+});
+
+test("signed code-sort cursors cover Unicode, slash, spaces, punctuation and the import field limit", async () => {
+  const special = ["CN-甲", "A/B", "A B", "A!", "PN-0001", "A\u0301",
+    "X".repeat(32_768), "甲".repeat(32_768)];
+  const source = createOfflineCatalogSource(special.map((code, index) =>
+    bundle(index + 20, code, "published", categoryA)));
+  const reader = repo(source);
+  for (const sort of ["product_code_asc", "product_code_desc"]) {
+    const expected = [...special].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    if (sort.endsWith("desc")) expected.reverse();
+    let cursor;
+    const pages = [];
+    do {
+      const page = await reader.listAdminProducts({ sort, limit: 1, ...(cursor ? { cursor } : {}) });
+      pages.push(page);
+      cursor = page.nextCursor;
+    } while (cursor);
+    assert.deepEqual(pages.flatMap(codes), expected);
+    assert.equal(pages.at(-1).nextCursor, null);
+    for (let index = pages.length - 1; index > 0; index--) {
+      const back = await reader.listAdminProducts({ sort, limit: 1,
+        cursor: pages[index].previousCursor, direction: "before" });
+      assert.deepEqual(codes(back), codes(pages[index - 1]));
+    }
+    const signed = pages[0].nextCursor;
+    assert.ok(signed);
+    const url = adminProductsHref(parseAdminProductsUrl({ sort }), signed, "after", 2);
+    assert.equal(parseAdminProductsUrl(params(url)).cursor, signed);
+    assert.ok(signed.length <= 1024);
+    const [payload, signature] = signed.split(".");
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    decoded[6] = "0".repeat(64);
+    await assert.rejects(reader.listAdminProducts({ sort, limit: 1,
+      cursor: `${Buffer.from(JSON.stringify(decoded)).toString("base64url")}.${signature}` }),
+    { code: "INVALID_INPUT" });
+    await assert.rejects(reader.listAdminProducts({ sort: sort === "product_code_asc"
+      ? "product_code_desc" : "product_code_asc", limit: 1, cursor: signed }),
+    { code: "INVALID_INPUT" });
+  }
+});
 
 test("search executes at the source boundary on code, English and Chinese names", async () => {
   const source = createOfflineCatalogSource(fixtures);
@@ -218,7 +308,7 @@ test("signed Admin cursors reject every payload, signature and key substitution 
     [Buffer.from(JSON.stringify({ v: 1, scope: "admin", sort: "updated_desc",
       filter: updatedFields[3], id: updatedFields[5], timestamp: updatedFields[6], featured: false })).toString("base64url"), "updated_desc"],
     [Buffer.from(JSON.stringify(updatedFields)).toString("base64url"), "updated_desc"],
-    ["a".repeat(1025), "updated_desc"],
+    ["a".repeat(150_001), "updated_desc"],
     ["not+base64", "updated_desc"],
     [code, "updated_desc"],
     [changePayload(code, 7, codeFields[7] + "X"), "product_code_asc"],
@@ -268,8 +358,8 @@ test("signing key remains outside cursor and response DTO", async () => {
   const result = await reader.listAdminProducts({ limit: 2, sort: "updated_desc" });
   assert.ok(result.nextCursor);
   const payload = JSON.parse(Buffer.from(result.nextCursor.split(".")[0], "base64url").toString("utf8"));
-  assert.equal(payload.length, 8);
-  assert.equal(payload[1], "admin");
+  assert.equal(payload.length, 7);
+  assert.equal(payload[1], "admin-v2");
   assert.equal(JSON.stringify(result).includes(encodedKey), false);
   assert.equal(result.nextCursor.includes(encodedKey), false);
 });

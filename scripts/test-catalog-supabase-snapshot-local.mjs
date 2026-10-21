@@ -80,6 +80,14 @@ test("snapshot SQL stays SELECT-only and returns complete metadata from the dedi
         "database_acl","schema_acl","relation_acl","role","function",
         "function_acl","function_effective","effective_database","effective_schema",
         "effective_relation"]) assert.ok(sections.has(name),`missing ${name}`);
+      const inventory = rows.find((r) => r.section === "permission_inventory")?.data;
+      assert.equal(inventory?.role_count,rows.filter((r) => r.section === "role").length);
+      assert.equal(inventory?.business_object_count,
+        rows.filter((r) => r.section === "business_object").length);
+      assert.equal(inventory?.snapshot_row_count,rows.length);
+      for (const membership of rows.filter((r) => r.section === "membership"))
+        for (const field of ["admin_option","inherit_option","set_option"])
+          assert.equal(typeof membership.data[field],"boolean",`${membership.item}:${field}`);
       assert.equal(rows.filter((r) => r.section === "relation").length,14);
       assert.equal(rows.find((r) => r.section === "role" &&
         r.item === "catalog_admin_reader_runtime")?.data?.login,true);

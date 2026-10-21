@@ -51,31 +51,77 @@ const platformRole = (name) => platformRoles.has(name) || name.startsWith("pg_")
 function checkCatalogOnlySnapshot(rows, { stage, migrationVersions, adminIdentity }) {
   const findings = [];
   const block = (code, detail) => findings.push({ severity:"BLOCK", code, detail });
-  const by = (section, item) => rows.find((r) => r.section === section && r.item === item)?.data;
-  const section = (name) => rows.filter((r) => r.section === name);
   if (!["empty","foundation","admin-read"].includes(stage) ||
       !["absent","present"].includes(adminIdentity) ||
       (stage === "empty" && adminIdentity !== "absent"))
     throw new Error("Catalog-only requires an explicit stage and adminIdentity=absent|present");
+  if (!Array.isArray(rows) || rows.some((row) => !row || typeof row !== "object" ||
+      typeof row.section !== "string" || typeof row.item !== "string" ||
+      !row.data || typeof row.data !== "object" || Array.isArray(row.data)))
+    return {decision:"BLOCKED",findings:[{severity:"BLOCK",code:"SNAPSHOT_INCOMPLETE",
+      detail:"malformed snapshot row"}]};
+  const by = (section, item) => rows.find((r) => r.section === section && r.item === item)?.data;
+  const section = (name) => rows.filter((r) => r.section === name);
   if (section("database").length !== 1 || section("migration_registry").length !== 1 ||
-      !by("role","anon") ||
+      ["anon","authenticated","service_role","postgres","authenticator"].some((role) => !by("role",role)) ||
       !by("schema","catalog_private") || !by("schema","catalog_public") ||
       !by("schema","rfq_private") || !by("schema","admin_private") ||
       by("schema","public")?.exists !== true ||
-      !Array.isArray(rows) || by("business_inventory","catalog-rfq-admin-prefixes")?.complete !== true)
+      by("business_inventory","catalog-rfq-admin-prefixes")?.complete !== true)
     block("SNAPSHOT_INCOMPLETE","database, schema, migration or business inventory metadata");
+  if (new Set(rows.map((row) => `${row.section}\u0000${row.item}`)).size !== rows.length)
+    block("SNAPSHOT_INCOMPLETE","duplicate snapshot section/item");
   const permissionInventory = by("permission_inventory","database-acl-and-membership");
   if (section("permission_inventory").length !== 1 || permissionInventory?.complete !== true ||
       !Number.isSafeInteger(permissionInventory.membership_count) ||
       !Number.isSafeInteger(permissionInventory.database_acl_count) ||
       !Number.isSafeInteger(permissionInventory.public_schema_acl_count) ||
+      !Number.isSafeInteger(permissionInventory.role_count) ||
+      !Number.isSafeInteger(permissionInventory.business_object_count) ||
+      !Number.isSafeInteger(permissionInventory.snapshot_row_count) ||
       permissionInventory.membership_count < 0 || permissionInventory.database_acl_count < 1 ||
-      permissionInventory.public_schema_acl_count < 1 ||
+      permissionInventory.public_schema_acl_count < 1 || permissionInventory.role_count < 1 ||
+      permissionInventory.business_object_count < 0 || permissionInventory.snapshot_row_count < 1 ||
       section("membership").length !== permissionInventory.membership_count ||
       section("database_acl").length !== permissionInventory.database_acl_count ||
+      section("role").length !== permissionInventory.role_count ||
+      section("business_object").length !== permissionInventory.business_object_count ||
+      rows.length !== permissionInventory.snapshot_row_count ||
       section("schema_acl").filter((row) => row.data?.schema === "public").length !==
         permissionInventory.public_schema_acl_count)
     block("SNAPSHOT_INCOMPLETE","database ACL or role membership inventory");
+  for (const row of section("role")) {
+    if (typeof row.item !== "string" || !["login","inherit","superuser","bypass_rls",
+      "create_db","create_role","replication"].every((key) => typeof row.data?.[key] === "boolean"))
+      block("SNAPSHOT_INCOMPLETE",`role flags: ${row.item}`);
+    else {
+      // These are minimum safety constraints, not an approval of the complete
+      // Supabase platform role inventory. Unknown platform roles remain gated below.
+      const lowPrivilege = ["anon","authenticated"].includes(row.item);
+      const serviceRole = row.item === "service_role";
+      const forbidden = ["superuser","create_db","create_role","replication",
+        ...(serviceRole ? [] : ["bypass_rls"])];
+      if (forbidden.some((key) => row.data[key]) ||
+          ((lowPrivilege || serviceRole) && (row.data.login || row.data.inherit)))
+        block("UNSAFE_ROLE_FLAGS",row.item);
+      if (row.item === "authenticator" && (!row.data.login || row.data.inherit))
+        block("UNSAFE_ROLE_FLAGS",row.item);
+    }
+  }
+  for (const row of section("membership")) {
+    const data = row.data;
+    if (typeof data?.member !== "string" || typeof data?.parent !== "string" ||
+        row.item !== `${data.member}->${data.parent}` ||
+        !["admin_option","inherit_option","set_option"].every((key) =>
+          typeof data[key] === "boolean") || !by("role",data.member) || !by("role",data.parent))
+      block("SNAPSHOT_INCOMPLETE",`membership fields: ${row.item}`);
+  }
+  for (const row of [...section("database_acl"),
+    ...section("schema_acl").filter((entry) => entry.data?.schema === "public")]) {
+    if (typeof row.data?.grantee !== "string" || typeof row.data?.privilege !== "string" ||
+        typeof row.data?.grantable !== "boolean")
+      block("SNAPSHOT_INCOMPLETE",`ACL fields: ${row.item}`);
+  }
   if (!Array.isArray(migrationVersions) ||
       migrationVersions.some((version) => typeof version !== "string" || !/^\d{14}$/.test(version)) ||
       new Set(migrationVersions).size !== migrationVersions.length)
@@ -90,7 +136,7 @@ function checkCatalogOnlySnapshot(rows, { stage, migrationVersions, adminIdentit
   }
   const registry = by("migration_registry","supabase_migrations.schema_migrations");
   if (stage !== "empty" && registry?.exists !== true) block("MISSING_MIGRATION_REGISTRY","schema_migrations");
-  if (stage === "empty" && registry?.exists !== true && registry?.exists !== false)
+  if (stage === "empty" && typeof registry?.exists !== "boolean")
     block("SNAPSHOT_INCOMPLETE","migration registry existence");
   for (const schema of businessSchemas) {
     const data = by("schema",schema);
@@ -99,6 +145,8 @@ function checkCatalogOnlySnapshot(rows, { stage, migrationVersions, adminIdentit
     if (data?.exists !== expected) block(expected ? "MISSING_SCHEMA" : "UNEXPECTED_SCHEMA",schema);
   }
   const expectedObjects = new Set();
+  const expectedSchemaObjects = new Set(stage === "empty" ? [] :
+    ["catalog_private","catalog_public",...(adminIdentity === "present" ? ["admin_private"] : [])]);
   if (stage !== "empty") {
     for (const table of privateTables) {
       expectedObjects.add(`relation:catalog_private.${table}`);
@@ -110,12 +158,19 @@ function checkCatalogOnlySnapshot(rows, { stage, migrationVersions, adminIdentit
   // The inventory is produced by the read-only snapshot SQL from pg_namespace/pg_class/pg_proc.
   for (const object of section("business_object")) {
     if (object.data?.kind === "schema") {
-      const schemaName = object.item.slice("schema:".length);
-      if (!businessSchemas.includes(schemaName)) block("UNKNOWN_BUSINESS_SCHEMA",schemaName);
+      const schemaName = object.item.startsWith("schema:")
+        ? object.item.slice("schema:".length) : "";
+      if (!businessSchemas.includes(schemaName)) block("UNKNOWN_BUSINESS_SCHEMA",object.item);
+      else if (!expectedSchemaObjects.has(schemaName))
+        block("UNEXPECTED_BUSINESS_OBJECT",object.item);
+      if (by("schema",schemaName)?.exists !== true)
+        block("SNAPSHOT_INCONSISTENT",object.item);
       continue;
     }
     if (!expectedObjects.has(object.item)) block("UNKNOWN_BUSINESS_OBJECT",object.item);
   }
+  for (const schemaName of expectedSchemaObjects) if (!by("business_object",`schema:${schemaName}`))
+    block("MISSING_BUSINESS_OBJECT",`schema:${schemaName}`);
   for (const object of expectedObjects) {
     if (!section("business_object").some((row) => row.item === object))
       block("MISSING_BUSINESS_OBJECT",object);
@@ -128,6 +183,10 @@ function checkCatalogOnlySnapshot(rows, { stage, migrationVersions, adminIdentit
   for (const row of section("role")) if (!allowedRoles.has(row.item) &&
       (businessRole.test(row.item) || !platformRole(row.item)))
     block("UNKNOWN_BUSINESS_ROLE",row.item);
+  // Names alone do not establish the attributes of other platform roles.
+  for (const row of section("role")) if (!allowedRoles.has(row.item) &&
+      !["anon","authenticated","service_role","postgres","authenticator"].includes(row.item))
+    block("UNREVIEWED_PLATFORM_ROLE",row.item);
   for (const role of allowedRoles) if (!by("role",role)) block("MISSING_ROLE",role);
   // No Supabase platform membership has been verified for this separate project.
   // Block every edge until a target-specific baseline is reviewed and encoded.
@@ -159,6 +218,8 @@ function checkCatalogOnlySnapshot(rows, { stage, migrationVersions, adminIdentit
     ["PUBLIC","anon","authenticated"].includes(acl.data?.grantee) &&
     acl.data?.privilege === "CREATE") block("UNEXPECTED_PUBLIC_SCHEMA_CREATE",acl.item);
   if (stage === "empty") {
+    if (section("business_object").length !== 0)
+      block("UNEXPECTED_BUSINESS_OBJECT","empty stage must have no business objects");
     for (const row of section("policy")) if (businessSchemas.some((s) => row.item.startsWith(`${s}.`)))
       block("UNEXPECTED_POLICY",row.item);
     return {decision:findings.length ? "BLOCKED" : "PASS",findings};

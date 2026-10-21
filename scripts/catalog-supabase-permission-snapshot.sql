@@ -141,12 +141,14 @@ rows AS (
   SELECT 'role',r.rolname,
     pg_catalog.jsonb_build_object('login',r.rolcanlogin,'inherit',r.rolinherit,
       'superuser',r.rolsuper,'bypass_rls',r.rolbypassrls,
-      'create_db',r.rolcreatedb,'create_role',r.rolcreaterole)
+      'create_db',r.rolcreatedb,'create_role',r.rolcreaterole,
+      'replication',r.rolreplication)
   FROM pg_catalog.pg_roles r
   UNION ALL
   SELECT 'membership',member.rolname||'->'||parent.rolname,
     pg_catalog.jsonb_build_object('member',member.rolname,'parent',parent.rolname,
-      'admin_option',m.admin_option)
+      'admin_option',m.admin_option,'inherit_option',m.inherit_option,
+      'set_option',m.set_option)
   FROM pg_catalog.pg_auth_members m
   JOIN pg_catalog.pg_roles member ON member.oid=m.member
   JOIN pg_catalog.pg_roles parent ON parent.oid=m.roleid
@@ -254,5 +256,10 @@ rows AS (
   FROM subjects s JOIN pg_catalog.pg_roles r ON r.rolname=s.role_name
   CROSS JOIN relations rel WHERE rel.oid IS NOT NULL
 )
-SELECT pg_catalog.jsonb_build_object('section',section,'item',item,'data',data) AS snapshot_row
+SELECT pg_catalog.jsonb_build_object('section',section,'item',item,'data',
+  CASE WHEN section='permission_inventory' THEN data || pg_catalog.jsonb_build_object(
+    'role_count',(SELECT count(*) FROM rows WHERE section='role'),
+    'business_object_count',(SELECT count(*) FROM rows WHERE section='business_object'),
+    'snapshot_row_count',(SELECT count(*) FROM rows))
+  ELSE data END) AS snapshot_row
 FROM rows ORDER BY section,item;

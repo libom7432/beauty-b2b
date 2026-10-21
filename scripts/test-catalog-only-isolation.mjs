@@ -17,16 +17,30 @@ const releaseScript = fileURLToPath(new URL("./prepare-catalog-only-migrations.m
 const ref = "abcdefghijklmnopqrst";
 const rfqRef = "qrstabcdefghijklmnop";
 
+test("PostgreSQL 17 snapshot SQL captures membership options and inventory counts",async () => {
+  const sql = await readFile(new URL("./catalog-supabase-permission-snapshot.sql",import.meta.url),"utf8");
+  assert.match(sql,/'admin_option'\s*,\s*m\.admin_option/);
+  assert.match(sql,/'inherit_option'\s*,\s*m\.inherit_option/);
+  assert.match(sql,/'set_option'\s*,\s*m\.set_option/);
+  for (const key of ["role_count","business_object_count","snapshot_row_count"])
+    assert.ok(sql.includes(`'${key}'`));
+  assert.match(sql,/^WITH\s/m);
+  assert.equal((sql.match(/;/g) ?? []).length,1);
+});
+
 function platformPermissions(rows) {
   rows.push({section:"schema",item:"public",data:{exists:true,owner:"postgres"}});
-  rows.push({section:"role",item:"authenticated",data:{login:false}});
-  rows.push({section:"role",item:"service_role",data:{login:false}});
-  rows.push({section:"permission_inventory",item:"database-acl-and-membership",
-    data:{complete:true,membership_count:0,database_acl_count:1,public_schema_acl_count:1}});
+  for (const role of ["authenticated","service_role","postgres","authenticator"])
+    rows.push({section:"role",item:role,data:{login:role === "postgres" || role === "authenticator",
+      inherit:false,superuser:false,bypass_rls:false,create_db:false,
+      create_role:false,replication:false}});
+  for (const row of rows.filter((entry) => entry.section === "role"))
+    row.data = {inherit:false,superuser:false,bypass_rls:false,create_db:false,
+      create_role:false,replication:false,...row.data};
   rows.push({section:"database_acl",item:"postgres:CREATE",
-    data:{grantee:"postgres",privilege:"CREATE"}});
+    data:{grantee:"postgres",privilege:"CREATE",grantable:false}});
   rows.push({section:"schema_acl",item:"public:postgres:CREATE",
-    data:{schema:"public",grantee:"postgres",privilege:"CREATE"}});
+    data:{schema:"public",grantee:"postgres",privilege:"CREATE",grantable:false}});
   for (const role of ["anon","authenticated"]) {
     if (!rows.some((r) => r.section === "effective_database" && r.item === role))
       rows.push({section:"effective_database",item:role,
@@ -34,6 +48,14 @@ function platformPermissions(rows) {
     rows.push({section:"effective_schema",item:`${role}:public`,
       data:{usage:true,create:false}});
   }
+  rows.push({section:"permission_inventory",item:"database-acl-and-membership",
+    data:{complete:true,membership_count:rows.filter((row) => row.section === "membership").length,
+      database_acl_count:rows.filter((row) => row.section === "database_acl").length,
+      public_schema_acl_count:rows.filter((row) => row.section === "schema_acl" &&
+        row.data?.schema === "public").length,
+      role_count:rows.filter((row) => row.section === "role").length,
+      business_object_count:rows.filter((row) => row.section === "business_object").length,
+      snapshot_row_count:rows.length + 1}});
   return rows;
 }
 
@@ -44,7 +66,7 @@ function snapshot(stage, adminIdentity = "absent") {
     {section:"migration_registry",item:"supabase_migrations.schema_migrations",data:{exists:false}},
     {section:"business_inventory",item:"catalog-rfq-admin-prefixes",data:{complete:true}},
     ...schemas.map((item) => ({section:"schema",item,data:{exists:false}})),
-    {section:"role",item:"anon",data:{login:true}},
+    {section:"role",item:"anon",data:{login:false}},
   ]);
   const rows = completeSnapshot(stage === "admin-read" ? "post" : "pre");
   rows.find((r) => r.section === "database").data.owner = "postgres";
@@ -75,7 +97,8 @@ function snapshot(stage, adminIdentity = "absent") {
     rows.push({section:"relation_acl",item:"admin_private.admin_users:catalog_owner:SELECT",
       data:{relation:"admin_private.admin_users",grantee:"catalog_owner",privilege:"SELECT"}});
     for (const role of ["admin_directory_reader","admin_directory_provisioner"])
-      rows.push({section:"role",item:role,data:{login:false,inherit:false,superuser:false,bypass_rls:false}});
+      rows.push({section:"role",item:role,data:{login:false,inherit:false,superuser:false,
+        bypass_rls:false,create_db:false,create_role:false,replication:false}});
     for (const role of ["admin_directory_reader","admin_directory_provisioner"])
       rows.push({section:"effective_database",item:role,
         data:{connect:true,create:false,temp:false}});
@@ -124,6 +147,7 @@ test("catalog-only CLI rejects missing, extra and malformed migration histories"
     ["foundation",[foundation,foundation],"MIGRATION_HISTORY_INVALID"],
     ["foundation",[foundation,"bad"],"MIGRATION_HISTORY_INVALID"],
     ["foundation",null,"MIGRATION_HISTORY_INVALID"],
+    ["empty",null,"MIGRATION_HISTORY_INVALID"],
     ["empty",[foundation],"UNEXPECTED_MIGRATION"],
   ];
   for (const [stage,versions,code] of cases) {
@@ -187,16 +211,24 @@ test("catalog-only CLI rejects business objects, RFQ schema, role, RLS and missi
 test("empty CLI rejects elevated grants, inheritance and incomplete permission metadata",async () => {
   const elevatedGrant = (rows) => {
     rows.push({section:"database_acl",item:"PUBLIC:CREATE",
-      data:{grantee:"PUBLIC",privilege:"CREATE"}});
+      data:{grantee:"PUBLIC",privilege:"CREATE",grantable:false}});
     rows.find((r) => r.section === "permission_inventory").data.database_acl_count++;
+    rows.find((r) => r.section === "permission_inventory").data.snapshot_row_count++;
   };
   const inheritedRole = (rows, parent = "service_role") => {
     rows.push({section:"membership",item:`anon->${parent}`,
-      data:{member:"anon",parent}});
+      data:{member:"anon",parent,admin_option:false,inherit_option:false,set_option:true}});
     rows.find((r) => r.section === "permission_inventory").data.membership_count++;
+    rows.find((r) => r.section === "permission_inventory").data.snapshot_row_count++;
   };
   const cases = [
     [(rows) => elevatedGrant(rows),"PUBLIC_DATABASE_CREATE_OR_TEMP"],
+    [(rows) => {
+      rows.push({section:"database_acl",item:"PUBLIC:TEMPORARY",
+        data:{grantee:"PUBLIC",privilege:"TEMPORARY",grantable:false}});
+      rows.find((r) => r.section === "permission_inventory").data.database_acl_count++;
+      rows.find((r) => r.section === "permission_inventory").data.snapshot_row_count++;
+    },"PUBLIC_DATABASE_CREATE_OR_TEMP"],
     [(rows) => inheritedRole(rows),"UNREVIEWED_ROLE_MEMBERSHIP"],
     [(rows) => { elevatedGrant(rows); inheritedRole(rows); },"UNREVIEWED_ROLE_MEMBERSHIP"],
     [(rows) => inheritedRole(rows,"postgres"),"UNREVIEWED_ROLE_MEMBERSHIP"],
@@ -221,6 +253,200 @@ test("empty CLI rejects elevated grants, inheritance and incomplete permission m
     assert.equal(result.output.decision,"BLOCKED");
     assert.ok(result.output.findings.some((f) => f.code === code),JSON.stringify(result.output));
   }
+});
+
+test("PostgreSQL 17 platform membership candidates remain blocked with exact options",async () => {
+  const candidate = ["anon","authenticated","service_role"].map((parent) => ({
+    section:"membership",item:`authenticator->${parent}`,
+    data:{member:"authenticator",parent,admin_option:false,inherit_option:false,set_option:true},
+  }));
+  const withMembers = () => {
+    const rows = snapshot("empty");
+    rows.push(...structuredClone(candidate));
+    const inventory = rows.find((row) => row.section === "permission_inventory").data;
+    inventory.membership_count += candidate.length;
+    inventory.snapshot_row_count += candidate.length;
+    return rows;
+  };
+  for (const [label,mutate,code] of [
+    ["all three candidates",() => {},"UNREVIEWED_ROLE_MEMBERSHIP"],
+    ["admin option",(rows) => { rows.at(-1).data.admin_option = true; },"UNREVIEWED_ROLE_MEMBERSHIP"],
+    ["inherit option",(rows) => { rows.at(-1).data.inherit_option = true; },"UNREVIEWED_ROLE_MEMBERSHIP"],
+    ["set option",(rows) => { rows.at(-1).data.set_option = false; },"UNREVIEWED_ROLE_MEMBERSHIP"],
+    ["missing option",(rows) => { delete rows.at(-1).data.set_option; },"SNAPSHOT_INCOMPLETE"],
+    ["null option",(rows) => { rows.at(-1).data.inherit_option = null; },"SNAPSHOT_INCOMPLETE"],
+    ["non-boolean option",(rows) => { rows.at(-1).data.admin_option = "false"; },"SNAPSHOT_INCOMPLETE"],
+    ["duplicate edge",(rows) => {
+      rows.push(structuredClone(rows.at(-1)));
+      const inventory = rows.find((row) => row.section === "permission_inventory").data;
+      inventory.membership_count++;
+      inventory.snapshot_row_count++;
+    },"SNAPSHOT_INCOMPLETE"],
+    ["extra privileged edge",(rows) => {
+      rows.push({section:"membership",item:"anon->postgres",
+        data:{member:"anon",parent:"postgres",admin_option:false,
+          inherit_option:false,set_option:true}});
+      const inventory = rows.find((row) => row.section === "permission_inventory").data;
+      inventory.membership_count++;
+      inventory.snapshot_row_count++;
+    },"UNREVIEWED_ROLE_MEMBERSHIP"],
+  ]) {
+    const rows = withMembers(); mutate(rows);
+    const result = await check(rows,"empty",[]);
+    assert.equal(result.exit,1,`${label}: ${JSON.stringify(result)}`);
+    assert.equal(result.output.decision,"BLOCKED");
+    assert.ok(result.output.findings.some((finding) => finding.code === code),label);
+  }
+});
+
+test("Catalog-only CLI rejects unsafe role attributes without trusting role names",async () => {
+  const unsafeFlags = ["superuser","create_db","create_role","replication","bypass_rls"];
+  for (const role of ["anon","authenticated"]) {
+    for (const flag of unsafeFlags) {
+      const rows = snapshot("empty");
+      rows.find((row) => row.section === "role" && row.item === role).data[flag] = true;
+      const result = await check(rows,"empty",[]);
+      assert.equal(result.exit,1,`${role}.${flag}: ${JSON.stringify(result)}`);
+      assert.equal(result.output.decision,"BLOCKED");
+      assert.ok(result.output.findings.some((finding) => finding.code === "UNSAFE_ROLE_FLAGS"));
+    }
+    for (const flag of ["login","inherit"]) {
+      const rows = snapshot("empty");
+      rows.find((row) => row.section === "role" && row.item === role).data[flag] = true;
+      const result = await check(rows,"empty",[]);
+      assert.equal(result.exit,1,`${role}.${flag}: ${JSON.stringify(result)}`);
+      assert.equal(result.output.decision,"BLOCKED");
+    }
+  }
+  for (const flag of ["superuser","create_db","create_role","replication","login","inherit"]) {
+    const rows = snapshot("empty");
+    rows.find((row) => row.section === "role" && row.item === "service_role").data[flag] = true;
+    const result = await check(rows,"empty",[]);
+    assert.equal(result.exit,1,`service_role.${flag}: ${JSON.stringify(result)}`);
+    assert.equal(result.output.decision,"BLOCKED");
+  }
+  const serviceBypass = snapshot("empty");
+  serviceBypass.find((row) => row.section === "role" && row.item === "service_role")
+    .data.bypass_rls = true;
+  const allowed = await check(serviceBypass,"empty",[]);
+  assert.equal(allowed.exit,0,JSON.stringify(allowed));
+  assert.equal(allowed.output.decision,"PASS");
+  for (const role of ["anon","authenticated","service_role","authenticator"]) {
+    for (const value of [undefined,null,"false"]) {
+      const rows = snapshot("empty");
+      const data = rows.find((row) => row.section === "role" && row.item === role).data;
+      if (value === undefined) delete data.superuser;
+      else data.superuser = value;
+      const result = await check(rows,"empty",[]);
+      assert.equal(result.exit,1,`${role}:${String(value)}: ${JSON.stringify(result)}`);
+      assert.equal(result.output.decision,"BLOCKED");
+      assert.ok(result.output.findings.some((finding) => finding.code === "SNAPSHOT_INCOMPLETE"));
+    }
+  }
+  for (const [role,flag,value] of [["authenticator","login",false],
+    ["authenticator","inherit",true]]) {
+    const rows = snapshot("empty");
+    rows.find((row) => row.section === "role" && row.item === role).data[flag] = value;
+    const result = await check(rows,"empty",[]);
+    assert.equal(result.exit,1,JSON.stringify(result));
+    assert.equal(result.output.decision,"BLOCKED");
+  }
+  const unknown = snapshot("empty");
+  unknown.push({section:"role",item:"dashboard_user",data:{login:false,inherit:false,
+    superuser:true,bypass_rls:false,create_db:false,create_role:false,replication:false}});
+  const inventory = unknown.find((row) => row.section === "permission_inventory").data;
+  inventory.role_count++;
+  inventory.snapshot_row_count++;
+  const result = await check(unknown,"empty",[]);
+  assert.equal(result.exit,1,JSON.stringify(result));
+  assert.equal(result.output.decision,"BLOCKED");
+  assert.ok(result.output.findings.some((finding) => finding.code === "UNREVIEWED_PLATFORM_ROLE"));
+  assert.ok(result.output.findings.some((finding) => finding.code === "UNSAFE_ROLE_FLAGS"));
+});
+
+test("Catalog-only inventory counts detect truncated roles and business objects",async () => {
+  for (const [stage,versions,mutate] of [
+    ["empty",[],(rows) => rows.splice(rows.findIndex((row) =>
+      row.section === "role" && row.item === "authenticated"),1)],
+    ["foundation",[foundation],(rows) => rows.splice(rows.findIndex((row) =>
+      row.section === "business_object" && row.item === "relation:catalog_private.products"),1)],
+    ["empty",[],(rows) => { delete rows.find((row) =>
+      row.section === "permission_inventory").data.role_count; }],
+    ["empty",[],(rows) => { delete rows.find((row) =>
+      row.section === "database_acl").data.grantable; }],
+    ["empty",[],(rows) => { delete rows.find((row) =>
+      row.section === "migration_registry").data.exists; }],
+  ]) {
+    const rows = snapshot(stage); mutate(rows);
+    const result = await check(rows,stage,versions);
+    assert.equal(result.exit,1,JSON.stringify(result));
+    assert.equal(result.output.decision,"BLOCKED");
+    assert.ok(result.output.findings.some((finding) => finding.code === "SNAPSHOT_INCOMPLETE"));
+  }
+});
+
+test("Catalog-only CLI enforces exact business objects for each stage",async () => {
+  const addObject = (rows,item,kind) => {
+    rows.push({section:"business_object",item,data:{kind}});
+    const inventory = rows.find((row) => row.section === "permission_inventory").data;
+    inventory.business_object_count++;
+    inventory.snapshot_row_count++;
+  };
+  for (const [label,item,kind] of [
+    ["catalog private schema","schema:catalog_private","schema"],
+    ["catalog public schema","schema:catalog_public","schema"],
+    ["admin schema","schema:admin_private","schema"],
+    ["RFQ private schema","schema:rfq_private","schema"],
+    ["RFQ public schema","schema:rfq_public","schema"],
+    ["catalog table","relation:catalog_private.products","relation"],
+    ["catalog view","relation:catalog_public.products","relation"],
+    ["catalog function","function:catalog_private.product_row_guard()","function"],
+    ["unknown schema","schema:unreviewed_private","schema"],
+  ]) {
+    const rows = snapshot("empty");
+    addObject(rows,item,kind);
+    const result = await check(rows,"empty",[]);
+    assert.equal(result.exit,1,`${label}: ${JSON.stringify(result)}`);
+    assert.equal(result.output.decision,"BLOCKED");
+    assert.ok(result.output.findings.some((finding) =>
+      ["UNEXPECTED_BUSINESS_OBJECT","UNKNOWN_BUSINESS_OBJECT",
+        "UNKNOWN_BUSINESS_SCHEMA"].includes(finding.code)),label);
+  }
+  for (const [label,stage,versions,mutate,code] of [
+    ["schema exists in empty","empty",[],(rows) => {
+      rows.find((row) => row.section === "schema" && row.item === "catalog_private")
+        .data.exists = true;
+    },"UNEXPECTED_SCHEMA"],
+    ["missing foundation schema object","foundation",[foundation],(rows) => {
+      rows.splice(rows.findIndex((row) => row.section === "business_object" &&
+        row.item === "schema:catalog_private"),1);
+      const inventory = rows.find((row) => row.section === "permission_inventory").data;
+      inventory.business_object_count--;
+      inventory.snapshot_row_count--;
+    },"MISSING_BUSINESS_OBJECT"],
+    ["inconsistent foundation schema","foundation",[foundation],(rows) => {
+      rows.find((row) => row.section === "schema" && row.item === "catalog_private")
+        .data.exists = false;
+    },"SNAPSHOT_INCONSISTENT"],
+    ["unexpected Admin object","admin-read",[foundation,reader],(rows) => {
+      addObject(rows,"schema:admin_private","schema");
+    },"UNEXPECTED_BUSINESS_OBJECT"],
+  ]) {
+    const rows = snapshot(stage); mutate(rows);
+    const result = await check(rows,stage,versions);
+    assert.equal(result.exit,1,`${label}: ${JSON.stringify(result)}`);
+    assert.equal(result.output.decision,"BLOCKED");
+    assert.ok(result.output.findings.some((finding) => finding.code === code),label);
+  }
+  const valid = await check(snapshot("empty"),"empty",[]);
+  assert.equal(valid.exit,0,JSON.stringify(valid));
+  assert.equal(valid.output.decision,"PASS");
+  const migrated = await check(snapshot("empty"),"empty",[foundation]);
+  assert.equal(migrated.exit,1);
+  assert.equal(migrated.output.decision,"BLOCKED");
+  const noHistory = await check(snapshot("empty"),"empty",null);
+  assert.notEqual(noHistory.exit,0);
+  assert.notEqual(noHistory.output?.decision,"PASS");
 });
 
 test("explicit profile is mandatory and legacy mixed CLI still enforces RFQ",async () => {

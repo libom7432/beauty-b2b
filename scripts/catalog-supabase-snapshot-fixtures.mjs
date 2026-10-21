@@ -7,12 +7,13 @@ export function completeSnapshot(stage) {
   for (const schema of ["catalog_private","catalog_public","rfq_private","admin_private"])
     add("schema",schema,{exists:true});
   for (const role of ["catalog_admin","catalog_import","catalog_public_reader","anon"])
-    add("role",role,{login:false,inherit:false,superuser:false,bypass_rls:false});
+    add("role",role,{login:false,inherit:false,superuser:false,bypass_rls:false,
+      create_db:false,create_role:false,replication:false});
   for (const role of ["catalog_admin","catalog_import","catalog_public_reader","anon"])
     add("effective_database",role,{connect:true,create:false,temp:false});
   if (stage === "post") {
     add("role","catalog_admin_reader_runtime",{login:true,inherit:false,superuser:false,
-      bypass_rls:false,create_db:false,create_role:false});
+      bypass_rls:false,create_db:false,create_role:false,replication:false});
     add("effective_database","catalog_admin_reader_runtime",{connect:true,create:false,temp:false});
     for (const schema of ["catalog_private","catalog_public","rfq_private","admin_private"])
       add("effective_schema",`catalog_admin_reader_runtime:${schema}`,

@@ -10,6 +10,7 @@ expected_relations(schema_name, object_name, object_kind) AS (
     ('catalog_private','product_images','table'),
     ('catalog_private','product_translations','table'),
     ('catalog_private','catalog_import_receipts','optional_table'),
+    ('admin_private','admin_users','optional_table'),
     ('catalog_public','products','view'),
     ('catalog_public','product_variants','view'),
     ('catalog_public','categories','view'),
@@ -50,6 +51,49 @@ rows AS (
       'encoding',pg_catalog.pg_encoding_to_char(d.encoding)) data
   FROM pg_catalog.pg_database d WHERE d.datname=current_database()
   UNION ALL
+  SELECT 'business_inventory','catalog-rfq-admin-prefixes',
+    pg_catalog.jsonb_build_object('complete',true)
+  UNION ALL
+  SELECT 'permission_inventory','database-acl-and-membership',
+    pg_catalog.jsonb_build_object('complete',true,
+      'membership_count',(SELECT count(*) FROM pg_catalog.pg_auth_members),
+      'database_acl_count',(SELECT count(*) FROM pg_catalog.pg_database d,
+        LATERAL pg_catalog.aclexplode(COALESCE(d.datacl,
+          pg_catalog.acldefault('d',d.datdba))) a
+        WHERE d.datname=current_database()),
+      'public_schema_acl_count',(SELECT count(*) FROM pg_catalog.pg_namespace n,
+        LATERAL pg_catalog.aclexplode(COALESCE(n.nspacl,
+          pg_catalog.acldefault('n',n.nspowner))) a
+        WHERE n.nspname='public'))
+  UNION ALL
+  SELECT 'business_object','schema:'||n.nspname,
+    pg_catalog.jsonb_build_object('kind','schema')
+  FROM pg_catalog.pg_namespace n
+  WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND
+    n.nspname NOT IN ('information_schema','public','auth','storage','extensions',
+      'graphql','graphql_public','realtime','vault','supabase_migrations',
+      'supabase_functions','net','cron','_analytics','_realtime')
+  UNION ALL
+  SELECT 'business_object','relation:'||n.nspname||'.'||c.relname,
+    pg_catalog.jsonb_build_object('kind','relation','actual_kind',c.relkind)
+  FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+  WHERE c.relkind IN ('r','v','m','p','f','S') AND
+    (n.nspname LIKE 'catalog\_%' ESCAPE '\' OR n.nspname LIKE 'rfq\_%' ESCAPE '\'
+    OR n.nspname LIKE 'admin\_%' ESCAPE '\' OR n.nspname = 'public')
+    AND (n.nspname <> 'public' OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d
+      WHERE d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+        AND d.objid = c.oid AND d.deptype = 'e'))
+  UNION ALL
+  SELECT 'business_object','function:'||format('%I.%I(%s)',n.nspname,p.proname,
+      pg_catalog.oidvectortypes(p.proargtypes)),
+    pg_catalog.jsonb_build_object('kind','function')
+  FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+  WHERE n.nspname LIKE 'catalog\_%' ESCAPE '\' OR n.nspname LIKE 'rfq\_%' ESCAPE '\'
+    OR n.nspname LIKE 'admin\_%' ESCAPE '\' OR
+      (n.nspname = 'public' AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d
+        WHERE d.classid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+          AND d.objid = p.oid AND d.deptype = 'e'))
+  UNION ALL
   SELECT 'migration_registry', 'supabase_migrations.schema_migrations',
     pg_catalog.jsonb_build_object('exists',
       pg_catalog.to_regclass('supabase_migrations.schema_migrations') IS NOT NULL)
@@ -66,7 +110,7 @@ rows AS (
       'rls_enabled',r.relrowsecurity,'rls_forced',r.relforcerowsecurity,
       'options',CASE WHEN r.oid IS NULL THEN NULL ELSE
         (SELECT pg_catalog.to_jsonb(c.reloptions) FROM pg_catalog.pg_class c WHERE c.oid=r.oid) END,
-      'columns',CASE WHEN r.relkind <> 'v' THEN NULL ELSE
+      'columns',CASE WHEN r.relkind NOT IN ('v','r') THEN NULL ELSE
         (SELECT pg_catalog.jsonb_agg(a.attname ORDER BY a.attnum)
           FROM pg_catalog.pg_attribute a WHERE a.attrelid=r.oid
             AND a.attnum>0 AND NOT a.attisdropped) END,

@@ -37,9 +37,223 @@ const expectedPolicies = (table, stage) => [
 ];
 const requiredVersions = ["20261010112952", "20261011120000", "20261013120000", "20261018120000"];
 const readerMigrationVersion = "20261020120000";
+const foundationVersion = "20261013120000";
+const adminIdentityVersion = "20261018120000";
+const rfqVersions = ["20261010112952", "20261011120000"];
+const businessSchemas = ["catalog_private","catalog_public","rfq_private","admin_private"];
+const businessRole = /^(catalog_|rfq_|admin_)/;
+const platformRoles = new Set(["anon","authenticated","service_role","postgres",
+  "authenticator","dashboard_user","pgbouncer","supabase_admin",
+  "supabase_auth_admin","supabase_storage_admin","supabase_realtime_admin",
+  "supabase_replication_admin","supabase_read_only_user","supabase_functions_admin"]);
+const platformRole = (name) => platformRoles.has(name) || name.startsWith("pg_");
+
+function checkCatalogOnlySnapshot(rows, { stage, migrationVersions, adminIdentity }) {
+  const findings = [];
+  const block = (code, detail) => findings.push({ severity:"BLOCK", code, detail });
+  const by = (section, item) => rows.find((r) => r.section === section && r.item === item)?.data;
+  const section = (name) => rows.filter((r) => r.section === name);
+  if (!["empty","foundation","admin-read"].includes(stage) ||
+      !["absent","present"].includes(adminIdentity) ||
+      (stage === "empty" && adminIdentity !== "absent"))
+    throw new Error("Catalog-only requires an explicit stage and adminIdentity=absent|present");
+  if (section("database").length !== 1 || section("migration_registry").length !== 1 ||
+      !by("role","anon") ||
+      !by("schema","catalog_private") || !by("schema","catalog_public") ||
+      !by("schema","rfq_private") || !by("schema","admin_private") ||
+      by("schema","public")?.exists !== true ||
+      !Array.isArray(rows) || by("business_inventory","catalog-rfq-admin-prefixes")?.complete !== true)
+    block("SNAPSHOT_INCOMPLETE","database, schema, migration or business inventory metadata");
+  const permissionInventory = by("permission_inventory","database-acl-and-membership");
+  if (section("permission_inventory").length !== 1 || permissionInventory?.complete !== true ||
+      !Number.isSafeInteger(permissionInventory.membership_count) ||
+      !Number.isSafeInteger(permissionInventory.database_acl_count) ||
+      !Number.isSafeInteger(permissionInventory.public_schema_acl_count) ||
+      permissionInventory.membership_count < 0 || permissionInventory.database_acl_count < 1 ||
+      permissionInventory.public_schema_acl_count < 1 ||
+      section("membership").length !== permissionInventory.membership_count ||
+      section("database_acl").length !== permissionInventory.database_acl_count ||
+      section("schema_acl").filter((row) => row.data?.schema === "public").length !==
+        permissionInventory.public_schema_acl_count)
+    block("SNAPSHOT_INCOMPLETE","database ACL or role membership inventory");
+  if (!Array.isArray(migrationVersions) ||
+      migrationVersions.some((version) => typeof version !== "string" || !/^\d{14}$/.test(version)) ||
+      new Set(migrationVersions).size !== migrationVersions.length)
+    block("MIGRATION_HISTORY_INVALID","unique 14-digit version list required");
+  else {
+    const allowed = stage === "empty" ? [] : [foundationVersion,
+      ...(adminIdentity === "present" ? [adminIdentityVersion] : []),
+      ...(stage === "admin-read" ? [readerMigrationVersion] : [])];
+    for (const version of allowed) if (!migrationVersions.includes(version)) block("MISSING_MIGRATION",version);
+    for (const version of migrationVersions) if (!allowed.includes(version))
+      block(rfqVersions.includes(version) ? "RFQ_MIGRATION_PRESENT" : "UNEXPECTED_MIGRATION",version);
+  }
+  const registry = by("migration_registry","supabase_migrations.schema_migrations");
+  if (stage !== "empty" && registry?.exists !== true) block("MISSING_MIGRATION_REGISTRY","schema_migrations");
+  if (stage === "empty" && registry?.exists !== true && registry?.exists !== false)
+    block("SNAPSHOT_INCOMPLETE","migration registry existence");
+  for (const schema of businessSchemas) {
+    const data = by("schema",schema);
+    const expected = schema === "rfq_private" ? false :
+      schema === "admin_private" ? adminIdentity === "present" : stage !== "empty";
+    if (data?.exists !== expected) block(expected ? "MISSING_SCHEMA" : "UNEXPECTED_SCHEMA",schema);
+  }
+  const expectedObjects = new Set();
+  if (stage !== "empty") {
+    for (const table of privateTables) {
+      expectedObjects.add(`relation:catalog_private.${table}`);
+      expectedObjects.add(`relation:catalog_public.${table}`);
+    }
+    for (const signature of foundationFunctions) expectedObjects.add(`function:catalog_private.${signature}`);
+  }
+  if (adminIdentity === "present") expectedObjects.add("relation:admin_private.admin_users");
+  // The inventory is produced by the read-only snapshot SQL from pg_namespace/pg_class/pg_proc.
+  for (const object of section("business_object")) {
+    if (object.data?.kind === "schema") {
+      const schemaName = object.item.slice("schema:".length);
+      if (!businessSchemas.includes(schemaName)) block("UNKNOWN_BUSINESS_SCHEMA",schemaName);
+      continue;
+    }
+    if (!expectedObjects.has(object.item)) block("UNKNOWN_BUSINESS_OBJECT",object.item);
+  }
+  for (const object of expectedObjects) {
+    if (!section("business_object").some((row) => row.item === object))
+      block("MISSING_BUSINESS_OBJECT",object);
+  }
+  const allowedRoles = new Set(stage === "empty" ? [] : ["catalog_admin","catalog_import",
+    "catalog_public_reader",...(stage === "admin-read" ? ["catalog_admin_reader_runtime"] : [])]);
+  if (adminIdentity === "present") {
+    allowedRoles.add("admin_directory_reader"); allowedRoles.add("admin_directory_provisioner");
+  }
+  for (const row of section("role")) if (!allowedRoles.has(row.item) &&
+      (businessRole.test(row.item) || !platformRole(row.item)))
+    block("UNKNOWN_BUSINESS_ROLE",row.item);
+  for (const role of allowedRoles) if (!by("role",role)) block("MISSING_ROLE",role);
+  // No Supabase platform membership has been verified for this separate project.
+  // Block every edge until a target-specific baseline is reviewed and encoded.
+  for (const row of section("membership"))
+    block("UNREVIEWED_ROLE_MEMBERSHIP",row.item);
+  for (const row of section("database_acl")) {
+    const {grantee,privilege} = row.data ?? {};
+    if (grantee === "PUBLIC" && ["CREATE","TEMPORARY","TEMP"].includes(privilege))
+      block("PUBLIC_DATABASE_CREATE_OR_TEMP",row.item);
+    if (["anon","authenticated",...allowedRoles].includes(grantee) &&
+        ["CREATE","TEMPORARY","TEMP"].includes(privilege))
+      block("UNEXPECTED_DATABASE_GRANT",row.item);
+    if (grantee !== "PUBLIC" && grantee !== by("database",section("database")[0]?.item)?.owner &&
+        !platformRole(grantee) && !allowedRoles.has(grantee))
+      block("UNKNOWN_DATABASE_GRANTEE",row.item);
+  }
+  for (const roleName of ["anon","authenticated",...allowedRoles]) {
+    const access = by("effective_database",roleName);
+    if (!access) block("SNAPSHOT_INCOMPLETE",`effective database: ${roleName}`);
+    else if (access.create !== false || access.temp !== false)
+      block("UNEXPECTED_DATABASE_PRIVILEGES",roleName);
+  }
+  for (const roleName of ["anon","authenticated"]) {
+    const access = by("effective_schema",`${roleName}:public`);
+    if (!access) block("SNAPSHOT_INCOMPLETE",`effective public schema: ${roleName}`);
+    else if (access.create !== false) block("UNEXPECTED_PUBLIC_SCHEMA_CREATE",roleName);
+  }
+  for (const acl of section("schema_acl")) if (acl.data?.schema === "public" &&
+    ["PUBLIC","anon","authenticated"].includes(acl.data?.grantee) &&
+    acl.data?.privilege === "CREATE") block("UNEXPECTED_PUBLIC_SCHEMA_CREATE",acl.item);
+  if (stage === "empty") {
+    for (const row of section("policy")) if (businessSchemas.some((s) => row.item.startsWith(`${s}.`)))
+      block("UNEXPECTED_POLICY",row.item);
+    return {decision:findings.length ? "BLOCKED" : "PASS",findings};
+  }
+  const permittedSchemaGrantees = {
+    catalog_private:new Set(["catalog_admin","catalog_import","catalog_public_reader",
+      ...(stage === "admin-read" ? ["catalog_admin_reader_runtime"] : [])]),
+    catalog_public:new Set(["anon","catalog_admin","catalog_import"]),
+    admin_private:new Set(["admin_directory_reader","admin_directory_provisioner"]),
+  };
+  for (const schemaName of ["catalog_private","catalog_public",
+    ...(adminIdentity === "present" ? ["admin_private"] : [])]) {
+    const acls = section("schema_acl").filter((r) => r.data?.schema === schemaName);
+    if (!acls.length) block("SNAPSHOT_INCOMPLETE",`schema ACL: ${schemaName}`);
+    const owner = by("schema",schemaName)?.owner;
+    for (const acl of acls) if (acl.data.grantee !== owner &&
+      (!permittedSchemaGrantees[schemaName].has(acl.data.grantee) ||
+        acl.data.privilege !== "USAGE"))
+      block("UNKNOWN_SCHEMA_ACL",acl.item);
+  }
+  for (const relationName of [...privateTables.map((name) => `catalog_private.${name}`),
+    ...privateTables.map((name) => `catalog_public.${name}`),
+    ...(adminIdentity === "present" ? ["admin_private.admin_users"] : [])]) {
+    const acls = section("relation_acl").filter((r) => r.data?.relation === relationName);
+    if (!acls.length) block("SNAPSHOT_INCOMPLETE",`relation ACL: ${relationName}`);
+    const owner = by("relation",relationName)?.owner;
+    const permitted = relationName.startsWith("catalog_private.")
+      ? new Set(["catalog_admin","catalog_import","catalog_public_reader",
+        ...(stage === "admin-read" ? ["catalog_admin_reader_runtime"] : [])])
+      : relationName.startsWith("catalog_public.") ? new Set(["anon"])
+        : new Set(["admin_directory_reader","admin_directory_provisioner"]);
+    for (const acl of acls) {
+      if (acl.data.grantee === owner) continue;
+      const granted = acl.data.privilege;
+      const role = acl.data.grantee;
+      const operations = relationName.startsWith("catalog_public.") ? ["SELECT"]
+        : role === "catalog_admin" ? ["SELECT","INSERT","UPDATE","DELETE"]
+        : role === "catalog_import" ? ["SELECT","INSERT","UPDATE"]
+        : role === "admin_directory_provisioner" ? ["SELECT","INSERT","UPDATE"]
+        : ["SELECT"];
+      if (!permitted.has(role) || !operations.includes(granted))
+        block("UNKNOWN_RELATION_ACL",acl.item);
+    }
+  }
+  for (const table of privateTables) {
+    for (const name of [`catalog_private.${table}`,`catalog_public.${table}`])
+      if (!by("effective_relation",`anon:${name}`))
+        block("SNAPSHOT_INCOMPLETE",`anon effective relation: ${name}`);
+  }
+  for (const schemaName of ["catalog_private","catalog_public"]) {
+    const access = by("effective_schema",`anon:${schemaName}`);
+    if (!access) block("SNAPSHOT_INCOMPLETE",`anon effective schema: ${schemaName}`);
+    else if (access.usage !== (schemaName === "catalog_public") || access.create !== false)
+      block("ANON_SCHEMA_PRIVILEGES",schemaName);
+  }
+  // Retain all Catalog structure/ACL checks from the mixed-project checker; only its
+  // RFQ/Admin schema and migration-version expectations are profile-specific.
+  const shared = checkSnapshotCore(rows, {
+    stage: stage === "admin-read" ? "post" : "pre",
+    migrationVersions,
+    profile: "catalog-shared",
+  });
+  findings.push(...shared.findings);
+  if (adminIdentity === "present") {
+    const table = by("relation","admin_private.admin_users");
+    if (!table?.exists || table.actual_kind !== "r" || !table.rls_enabled || !table.rls_forced ||
+        JSON.stringify(table.columns) !== JSON.stringify(["id","auth_user_id","status","role",
+          "created_at","updated_at","disabled_at"]))
+      block("ADMIN_IDENTITY_STRUCTURE","admin_private.admin_users");
+    const expectedAdminPolicies = {
+      admin_directory_reader_select:"admin_directory_reader",
+      admin_directory_provisioner_all:"admin_directory_provisioner",
+    };
+    for (const [name,role] of Object.entries(expectedAdminPolicies)) {
+      const policy = by("policy",`admin_private.admin_users.${name}`);
+      if (!policy || !policy.roles?.includes(role) || policy.using_true !== true ||
+          policy.command !== (name.endsWith("_all") ? "*" : "r") ||
+          (name.endsWith("_all") && policy.check_true !== true))
+        block("ADMIN_POLICY_MISMATCH",name);
+    }
+    for (const policy of section("policy").filter((r) => r.item.startsWith("admin_private.admin_users.")))
+      if (!Object.hasOwn(expectedAdminPolicies,policy.item.split(".").at(-1)))
+        block("UNKNOWN_ADMIN_POLICY",policy.item);
+    for (const roleName of ["admin_directory_reader","admin_directory_provisioner"]) {
+      const role = by("role",roleName);
+      if (role && (role.login || role.inherit || role.superuser || role.bypass_rls))
+        block("ADMIN_ROLE_FLAGS",roleName);
+    }
+  } else if (by("relation","admin_private.admin_users")?.exists)
+    block("UNEXPECTED_ADMIN_IDENTITY","admin_private.admin_users");
+  return {decision:findings.length ? "BLOCKED" : "PASS",findings};
+}
 
 /** Pure comparison: consumes only metadata rows, never a database connection. */
-export function checkCatalogPermissionSnapshot(rows, { stage = "pre", migrationVersions = null } = {}) {
+function checkSnapshotCore(rows, { stage, migrationVersions, profile }) {
   if (!["pre", "post"].includes(stage)) throw new Error("stage must be pre or post");
   const findings = [];
   const block = (code, detail) => findings.push({ severity: "BLOCK", code, detail });
@@ -56,7 +270,7 @@ export function checkCatalogPermissionSnapshot(rows, { stage = "pre", migrationV
     if (role && (role.login || role.inherit || role.superuser || role.bypass_rls))
       block("FOUNDATION_ROLE_FLAGS",roleName);
   }
-  for (const schema of ["catalog_private","catalog_public","rfq_private","admin_private"]) {
+  for (const schema of (profile === "catalog-shared" ? ["catalog_private","catalog_public"] : businessSchemas)) {
     if (by("schema",schema)?.exists !== true) block("MISSING_SCHEMA",schema);
   }
   const foundationOwner = by("relation","catalog_private.products")?.owner;
@@ -191,7 +405,7 @@ export function checkCatalogPermissionSnapshot(rows, { stage = "pre", migrationV
       reader.create_role || !reader.login) block("READER_ROLE_FLAGS","catalog_admin_reader_runtime");
     const db = by("effective_database","catalog_admin_reader_runtime");
     if (!db?.connect || db.create || db.temp) block("READER_DATABASE_PRIVILEGES","catalog_admin_reader_runtime");
-    for (const schema of ["catalog_private","catalog_public","rfq_private","admin_private"]) {
+    for (const schema of (profile === "catalog-shared" ? ["catalog_private","catalog_public"] : businessSchemas)) {
       const effective = by("effective_schema",`catalog_admin_reader_runtime:${schema}`);
       if (schema === "catalog_private" ? !effective?.usage || effective.create
         : effective?.usage || effective?.create)
@@ -225,14 +439,17 @@ export function checkCatalogPermissionSnapshot(rows, { stage = "pre", migrationV
   }
   const registry = by("migration_registry","supabase_migrations.schema_migrations");
   if (!registry?.exists) block("MISSING_MIGRATION_REGISTRY","supabase_migrations.schema_migrations");
-  if (migrationVersions === null || migrationVersions === undefined)
+  if (profile === "catalog-shared") {
+    // The parent Catalog-only gate has already checked the actual exact version set.
+  } else if (migrationVersions === null || migrationVersions === undefined)
     block("MIGRATION_HISTORY_UNVERIFIED","version-only list required");
   else if (!Array.isArray(migrationVersions) || migrationVersions.length === 0 ||
     migrationVersions.some((version) => typeof version !== "string" || !/^\d{14}$/.test(version)) ||
     new Set(migrationVersions).size !== migrationVersions.length)
     block("MIGRATION_HISTORY_INVALID","expected unique 14-digit migration versions");
   else {
-    for (const version of requiredVersions) if (!migrationVersions.includes(version))
+    for (const version of (profile === "catalog-shared" ? [foundationVersion] : requiredVersions))
+      if (!migrationVersions.includes(version))
       block("MISSING_MIGRATION",version);
     if (stage === "pre" && migrationVersions.includes(readerMigrationVersion))
       block("READ_ROLE_MIGRATION_ALREADY_APPLIED",readerMigrationVersion);
@@ -242,17 +459,35 @@ export function checkCatalogPermissionSnapshot(rows, { stage = "pre", migrationV
   return { decision: findings.length ? "BLOCKED" : "PASS", findings };
 }
 
+/** Only the explicit public profiles are accepted; shared checks are private implementation detail. */
+export function checkCatalogPermissionSnapshot(rows, { stage = "pre", migrationVersions = null,
+  profile = "mixed", adminIdentity } = {}) {
+  if (profile === "catalog-only")
+    return checkCatalogOnlySnapshot(rows,{stage,migrationVersions,adminIdentity});
+  if (profile !== "mixed") throw new Error("Unknown snapshot profile");
+  return checkSnapshotCore(rows,{stage,migrationVersions,profile});
+}
+
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-  const [path, stage, historyPath] = process.argv.slice(2);
-  if (!path || !["pre","post"].includes(stage)) {
-    process.stderr.write("Usage: node check-catalog-supabase-snapshot.mjs <snapshot.jsonl> <pre|post> [migration-versions.txt]\n");
+  const args = process.argv.slice(2);
+  const catalogOnly = args[0] === "catalog-only";
+  const [path, stage] = catalogOnly ? args.slice(1) : args;
+  const historyPath = catalogOnly ? (args.length === 5 ? args[3] : undefined) : args[2];
+  const adminIdentity = catalogOnly ? args.at(-1) : undefined;
+  if (!path || (catalogOnly ? ![4,5].includes(args.length) ||
+      !["empty","foundation","admin-read"].includes(stage) ||
+      !["absent","present"].includes(adminIdentity) :
+      args.length < 2 || args.length > 3 || !["pre","post"].includes(stage))) {
+    process.stderr.write("Usage: checker <snapshot.jsonl> <pre|post> [migration-versions.txt] OR checker catalog-only <snapshot.jsonl> <empty|foundation|admin-read> <migration-versions.txt> <absent|present>\n");
     process.exitCode = 2;
   } else {
     const rows = (await readFile(path,"utf8")).trim().split(/\r?\n/).filter(Boolean)
       .map((line) => JSON.parse(line));
-    const migrationVersions = historyPath ? (await readFile(historyPath,"utf8"))
-      .trim().split(/\r?\n/).filter(Boolean) : null;
-    const result = checkCatalogPermissionSnapshot(rows,{stage,migrationVersions});
+    const migrationVersions = historyPath ? await readFile(historyPath,"utf8")
+      .then((value) => value.trim().split(/\r?\n/).filter(Boolean))
+      .catch(() => null) : null;
+    const result = checkCatalogPermissionSnapshot(rows,{stage,migrationVersions,
+      profile:catalogOnly ? "catalog-only" : "mixed",adminIdentity});
     process.stdout.write(`${JSON.stringify(result,null,2)}\n`);
     if (result.decision !== "PASS") process.exitCode = 1;
   }

@@ -136,6 +136,12 @@
 .admin-category-search-results button { text-align: left; }
 .admin-category-diagnostics { margin-top: 18px; }
 .admin-category-diagnostics li { margin-top: 8px; overflow-wrap: anywhere; font-size: 12px; }
+.admin-category-editor { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--admin-line); }
+.admin-category-editor .admin-editor-grid { margin-top: 16px; }
+.admin-category-editor .admin-editor-grid label { display: grid; gap: 7px; min-width: 0; }
+.admin-category-editor .admin-editor-grid input,
+.admin-category-editor .admin-editor-grid textarea,
+.admin-category-editor .admin-editor-grid select { min-width: 0; width: 100%; }
 .admin-mobile-close, .admin-menu-trigger { display: none; }
 .admin-mobile-dialog:not([open]) { display: none; }
 .admin-mobile-dialog { display: none; }

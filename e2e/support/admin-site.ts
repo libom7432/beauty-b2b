@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -212,6 +212,9 @@ export async function startAdminFixture() {
     writeFileSync(join(fixtureRoot, "src/lib/admin/server-access.ts"), accessFixture);
     writeFileSync(join(fixtureRoot, "src/lib/admin/ui-identity.ts"), identityFixture);
     writeFileSync(join(fixtureRoot, "src/lib/catalog-read/server.ts"), catalogFixture);
+    const categoryRefreshRoute = join(fixtureRoot, "src/app/admin/(workspace)/category-refresh-fixture");
+    mkdirSync(categoryRefreshRoute, { recursive: true });
+    cpSync(join(repositoryRoot, "e2e/support/category-refresh-page.tsx"), join(categoryRefreshRoute, "page.tsx"));
     const panelPath = join(fixtureRoot, "src/components/admin/product-list-panel.tsx");
     const panelSource = readFileSync(panelPath, "utf8");
     if (!panelSource.includes("testData = false")) throw Error("Admin products fixture no longer matches the list panel");

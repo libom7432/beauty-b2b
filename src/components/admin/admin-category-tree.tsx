@@ -1,8 +1,11 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AdminBadge, AdminPageHeader } from "./ui";
 import type { AdminCategoryDTO, AdminCategoryReadResult } from "@/lib/catalog-read/types";
+import { categoryDraftFingerprint, categorySourceChanged, createCategorySelection,
+  validateCategoryDraft, type CategoryDraft, type CategorySelection } from "@/lib/admin/category-editor-draft";
+import { useAdminUnsavedChanges } from "./admin-unsaved-changes";
 
 const compare = (a: AdminCategoryDTO, b: AdminCategoryDTO) =>
   a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -16,7 +19,9 @@ const issueText: Record<string, string> = {
 
 export function AdminCategoryTree({ result }: { result: AdminCategoryReadResult }) {
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<CategorySelection | null>(null);
+  const [checked, setChecked] = useState(false);
+  const { setDirty, confirmNavigation } = useAdminUnsavedChanges();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const treeIds = useMemo(() => new Set(result.treeIds), [result.treeIds]);
   const byId = useMemo(() => new Map(result.items.filter((item) => treeIds.has(item.id))
@@ -28,7 +33,34 @@ export function AdminCategoryTree({ result }: { result: AdminCategoryReadResult 
     for (const group of groups.values()) group.sort(compare);
     return groups;
   }, [byId]);
-  const selected = selectedId ? byId.get(selectedId) : undefined;
+  const selectedId = selection?.originalCategory.id ?? null;
+  const currentCategory = selectedId && (result.state === "COMPLETE" || result.state === "INCOMPLETE")
+    ? byId.get(selectedId) : undefined;
+  const selected = selection?.originalCategory;
+  const draft = selection?.draft;
+  const sourceChanged = !!selection && categorySourceChanged(selection.originalCategory, currentCategory);
+  const dirty = !!selection && categoryDraftFingerprint(selection.draft) !==
+    categoryDraftFingerprint(selection.originalDraft);
+  useEffect(() => { setDirty(dirty); }, [dirty, setDirty]);
+  useEffect(() => () => setDirty(false), [setDirty]);
+  const validation = checked && selection && !sourceChanged
+    ? validateCategoryDraft(selection.originalCategory, selection.draft, result) : null;
+  const selectCategory = (id: string) => {
+    if (selectedId === id) return;
+    if (dirty && !confirmNavigation()) return;
+    const category = byId.get(id);
+    if (!category) return;
+    setSelection(createCategorySelection(category));
+    setChecked(false);
+  };
+  const update = <K extends keyof CategoryDraft>(field: K, value: CategoryDraft[K]) => {
+    setSelection((current) => current ? { ...current, draft: { ...current.draft, [field]: value } } : current);
+    setChecked(false);
+  };
+  const discard = () => {
+    setSelection(currentCategory ? createCategorySelection(currentCategory) : null);
+    setChecked(false);
+  };
   const path = (item: AdminCategoryDTO) => {
     const names = [label(item)];
     let cursor = item.parentId;
@@ -59,18 +91,54 @@ export function AdminCategoryTree({ result }: { result: AdminCategoryReadResult 
             aria-expanded={!isCollapsed} onClick={() => toggle(item.id)}>{isCollapsed ? "+" : "−"}</button>
             : <span className="admin-category-spacer" aria-hidden="true" />}
           <button type="button" className="admin-category-select" aria-current={selectedId === item.id ? "true" : undefined}
-            onClick={() => setSelectedId(item.id)}>{label(item)}</button>
+            onClick={() => selectCategory(item.id)}>{label(item)}</button>
           <span className="admin-category-status">{item.status}</span>
         </div>
         {nested.length > 0 && !isCollapsed && renderBranch(item.id)}
       </li>;
     })}
   </ul>;
+  const editor = draft && <section className="admin-card admin-category-editor" role="region" aria-label="Local category editor">
+    <h3>Local category draft</h3>
+    <p className="admin-editor-warning">LOCAL DEMO / NOT CONNECTED · Changes will be lost on refresh or departure.</p>
+    {sourceChanged && <p className="admin-category-notice" role="alert">Source data has changed or is unavailable. This draft is based on an earlier read. Discard changes to load current data, or switch categories after confirming.</p>}
+    {result.state === "INCOMPLETE" && <p role="status">Category data is incomplete. Parent, child and product impact cannot be fully verified.</p>}
+    <p role="status">{dirty ? "Unsaved local changes" : "No local changes"}</p>
+    <div className="admin-editor-grid">
+      <label>English name<input value={draft.nameEn} disabled={sourceChanged}
+        onChange={(event) => update("nameEn", event.target.value)} /></label>
+      <label>中文名称<input value={draft.nameZh} disabled={sourceChanged}
+        onChange={(event) => update("nameZh", event.target.value)} /></label>
+      <label>English description<textarea value={draft.descriptionEn} disabled={sourceChanged}
+        onChange={(event) => update("descriptionEn", event.target.value)} /></label>
+      <label>中文描述<textarea value={draft.descriptionZh} disabled={sourceChanged}
+        onChange={(event) => update("descriptionZh", event.target.value)} /></label>
+      <label>Category status<select value={draft.status} disabled={sourceChanged}
+        onChange={(event) => update("status", event.target.value as CategoryDraft["status"])}>
+        {(["draft", "published", "retired"] as const).map((status) => <option key={status} value={status}>{status}</option>)}
+      </select></label>
+      <label>Sort order<input value={draft.sortOrderText} inputMode="numeric" disabled={sourceChanged}
+        onChange={(event) => update("sortOrderText", event.target.value)} /></label>
+    </div>
+    <div className="admin-editor-actions">
+      <button type="button" disabled={sourceChanged} onClick={() => setChecked(true)}>Check draft</button>
+      <button type="button" onClick={discard}>Discard changes</button>
+    </div>
+    {validation && <div className="admin-editor-validation" aria-live="polite">
+      <strong>Local fields: {validation.localState}</strong>
+      <p>Full category and product impact: {validation.overallState}</p>
+      {validation.issues.length > 0 && <ul aria-label="Category draft errors">{validation.issues.map((issue, index) =>
+        <li key={`${issue.field_path}-${issue.error_code}-${index}`} data-field-path={issue.field_path}>
+          {issue.field_path}: {issue.error_code} — {issue.message}</li>)}</ul>}
+      <ul aria-label="Not verified checks">{validation.notVerified.map((reason) =>
+        <li key={reason}>{reason}: NOT_VERIFIED</li>)}</ul>
+    </div>}
+  </section>;
 
   return <>
     <AdminPageHeader eyebrow="CATALOG / CATEGORIES" title="Categories"
-      description="Review the read-only category hierarchy and its existing fields.">
-      <AdminBadge tone="warning">READ ONLY / NOT CONNECTED FOR WRITES</AdminBadge>
+      description="Read-only category data with browser-only draft editing; changes are never saved to the server.">
+      <AdminBadge tone="warning">LOCAL DEMO / NOT CONNECTED</AdminBadge>
     </AdminPageHeader>
     {result.state === "NOT_CONNECTED" ? <section className="admin-card" role="status">
       <h2>Category database not connected</h2><p>No category records were loaded.</p>
@@ -91,16 +159,16 @@ export function AdminCategoryTree({ result }: { result: AdminCategoryReadResult 
               placeholder="English, 中文 or slug" />
           </label>
           {needle ? <ul className="admin-category-search-results">{matches.map((item) => <li key={item.id}>
-            <button type="button" onClick={() => setSelectedId(item.id)}>{path(item)}</button>
+            <button type="button" onClick={() => selectCategory(item.id)}>{path(item)}</button>
           </li>)}</ul> : renderBranch(null)}
           {needle && matches.length === 0 && <p>No matching categories in the loaded set.</p>}
           {!needle && treeIds.size === 0 && <p>No verifiable category roots in the loaded set.</p>}
         </section>
         <section className="admin-card" aria-label="Category detail">
           <h2>Category detail</h2>
-          {selected ? <dl className="admin-detail-list">
+          {selected ? <><dl className="admin-detail-list">
             <div><dt>UUID</dt><dd>{selected.id}</dd></div>
-            <div><dt>Path</dt><dd>{path(selected)}</dd></div>
+            <div><dt>Path</dt><dd>{sourceChanged ? "Unavailable from current data" : path(selected)}</dd></div>
             <div><dt>Slug</dt><dd>{selected.slug}</dd></div>
             <div><dt>Status</dt><dd>{selected.status}</dd></div>
             <div><dt>English name</dt><dd>{selected.nameEn || "Not provided"}</dd></div>
@@ -108,7 +176,7 @@ export function AdminCategoryTree({ result }: { result: AdminCategoryReadResult 
             <div><dt>English description</dt><dd>{selected.descriptionEn || "Not provided"}</dd></div>
             <div><dt>中文描述</dt><dd>{selected.descriptionZh || "未提供"}</dd></div>
             <div><dt>Sort order</dt><dd>{selected.sortOrder}</dd></div>
-          </dl> : <p>Select a category to view its read-only fields.</p>}
+          </dl></> : <p>Select a category to view its read-only fields.</p>}
         </section>
       </div>}
       {result.issues.length > 0 && <section className="admin-card admin-category-diagnostics" aria-label="Category diagnostics">
@@ -117,5 +185,6 @@ export function AdminCategoryTree({ result }: { result: AdminCategoryReadResult 
         </li>)}</ul>
       </section>}
     </>}
+    {editor}
   </>;
 }

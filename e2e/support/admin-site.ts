@@ -99,6 +99,33 @@ function row(n: number, status: "draft" | "published" | "retired"): PrivateCatal
           created_at: date, updated_at: date }] : [])] };
 }
 const sample = createOfflineCatalogSource([row(1, "draft"), row(2, "published"), row(3, "retired")]);
+const categoryDate = { created_at: date, updated_at: date };
+const category = (number: number, parent: number | null, slug: string, en: string, zh: string, order: number) => ({
+  ...categoryDate, id: id(number), parent_id: parent === null ? null : id(parent), slug,
+  status: "published" as const, name_en: en, name_zh: zh,
+  description_en: "English description", description_zh: "中文描述", sort_order: order,
+});
+const categoryRows = [category(710, null, "nails", "Nails", "美甲", 2),
+  category(711, 710, "press-on", "Press On", "穿戴甲", 0),
+  category(712, 711, "almond", "Almond", "杏仁形", 0),
+  category(713, null, "care", "Care", "护理", 1),
+  category(714, 712, "deep", "Deep", "深层", 0)];
+const categorySource = createOfflineCatalogSource([], categoryRows);
+const categoryEmpty = createOfflineCatalogSource([], []);
+const categoryIncomplete = createOfflineCatalogSource([], [category(720, 799, "orphan", "Orphan", "孤儿", 0)]);
+const categoryCycle = createOfflineCatalogSource([], [category(720, 721, "cycle-a", "Cycle A", "循环甲", 0),
+  category(721, 720, "cycle-b", "Cycle B", "循环乙", 0)]);
+const categoryDuplicate = createOfflineCatalogSource([], [categoryRows[0], categoryRows[0]]);
+const categoryTruncated = createOfflineCatalogSource([], Array.from({ length: 501 }, (_, index) =>
+  category(1000 + index, null, \`cat-\${index}\`, \`Category \${index}\`, "分类", index)));
+const categoryTruncatedParent = createOfflineCatalogSource([], [
+  ...Array.from({ length: 499 }, (_, index) =>
+    category(1000 + index, null, "cat-" + index, "Category " + index, "分类", index)),
+  category(1499, 1600, "orphan-at-limit", "Orphan at limit", "边界孤儿", 499),
+  category(1600, null, "parent-past-limit", "Parent past limit", "边界父级", 500),
+]);
+const categoryFailed = { ...categorySource, async listAdminCategories(): Promise<never> {
+  throw Error("private://category-secret"); } };
 const querySample = createOfflineCatalogSource(Array.from({ length: 45 }, (_, index) =>
   row(index + 1, index % 3 === 0 ? "draft" : index % 3 === 1 ? "published" : "retired")));
 const specialSample = createOfflineCatalogSource(Array.from({ length: 22 }, (_, index) => {
@@ -136,6 +163,11 @@ export async function createServerCatalogReadRepository() {
   const role = cookieStore.get("admin-ui-fixture")?.value;
   const state = cookieStore.get("catalog-read-fixture")?.value;
   const source = state === "success" ? sample : state === "query" ? querySample :
+    state === "category" ? categorySource : state === "category-empty" ? categoryEmpty :
+    state === "category-incomplete" ? categoryIncomplete : state === "category-cycle" ? categoryCycle :
+    state === "category-duplicate" ? categoryDuplicate : state === "category-truncated" ? categoryTruncated :
+    state === "category-truncated-parent" ? categoryTruncatedParent :
+    state === "category-error" ? categoryFailed :
     state === "special" ? specialSample : state === "length" ? lengthSample :
     (cursorSamples.get(state ?? "") ??
       (state === "legacy-options" ? legacyOptions : state === "empty" ? empty :

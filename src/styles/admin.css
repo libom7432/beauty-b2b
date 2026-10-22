@@ -118,6 +118,24 @@
 .admin-editor-actions { margin-top: 18px; }
 .admin-editor-validation { margin-top: 18px; padding: 14px; border: 1px solid #e9d9bd; border-radius: 8px; background: #fbf9f2; font-size: 12px; }
 .admin-editor-validation li { margin-top: 6px; overflow-wrap: anywhere; }
+.admin-category-provenance { color: var(--admin-muted); font-size: 12px; }
+.admin-category-notice { padding: 12px 16px; border: 1px solid #e9d9bd; border-radius: 8px; background: #fbf5e9; color: #71552e; font-size: 12px; }
+.admin-category-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 1fr); gap: 18px; }
+.admin-category-layout .admin-card { min-width: 0; }
+.admin-category-search { display: grid; gap: 7px; margin: 18px 0; color: #59665c; font-size: 12px; font-weight: 700; }
+.admin-category-search input { min-width: 0; padding: 10px; border: 1px solid #cbd4ca; border-radius: 7px; }
+.admin-category-branches, .admin-category-search-results { margin: 0; padding: 0; list-style: none; }
+.admin-category-branches .admin-category-branches { margin-left: 18px; border-left: 1px solid var(--admin-line); padding-left: 10px; }
+.admin-category-row { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 5px 0; }
+.admin-category-row button, .admin-category-search-results button { border: 0; background: none; color: #34543c; }
+.admin-category-row button:first-child, .admin-category-spacer { display: grid; place-items: center; flex: none; width: 28px; height: 28px; }
+.admin-category-row .admin-category-select { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.admin-category-row .admin-category-select[aria-current="true"] { font-weight: 700; text-decoration: underline; }
+.admin-category-status { color: var(--admin-muted); font-size: 10px; }
+.admin-category-search-results li { padding: 7px 0; overflow-wrap: anywhere; }
+.admin-category-search-results button { text-align: left; }
+.admin-category-diagnostics { margin-top: 18px; }
+.admin-category-diagnostics li { margin-top: 8px; overflow-wrap: anywhere; font-size: 12px; }
 .admin-mobile-close, .admin-menu-trigger { display: none; }
 .admin-mobile-dialog:not([open]) { display: none; }
 .admin-mobile-dialog { display: none; }
@@ -144,6 +162,7 @@
   .admin-content { padding: 23px 16px 50px; }
   .admin-page-header { align-items: flex-start; flex-direction: column; margin-bottom: 21px; }
   .admin-overview, .admin-grid, .admin-detail-grid { grid-template-columns: 1fr; }
+  .admin-category-layout { grid-template-columns: 1fr; }
   .admin-editor-grid, .admin-editor-row { grid-template-columns: 1fr; }
   .admin-overview-banner { min-height: 165px; }
   .admin-card { padding: 20px; }

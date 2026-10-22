@@ -101,6 +101,22 @@ export type SourceQuery = Readonly<{ limit: number; cursor: string | null; sort:
 export type SourcePage<T> = Readonly<{ rows: readonly T[]; hasMore: boolean; hasPrevious?: boolean }>;
 export type AdminCategoryOption = Readonly<{ id: string; nameEn: string; nameZh: string }>;
 export type AdminCategoryOptions = Readonly<{ items: readonly AdminCategoryOption[]; hasMore: boolean }>;
+export type AdminCategoryDTO = Readonly<{ id: string; parentId: string | null; slug: string;
+  status: CatalogStatus; nameEn: string; nameZh: string; descriptionEn: string;
+  descriptionZh: string; sortOrder: number }>;
+export type AdminCategoryIssue = Readonly<{ code: "DUPLICATE_ID" | "MISSING_PARENT" | "CYCLE" |
+  "UNREACHABLE" | "DEPTH_OVER_3" | "INVALID_ROW" | "COUNT_MISMATCH";
+  categoryId: string | null }>;
+export type AdminCategoryReadResult = Readonly<{
+  state: "COMPLETE" | "INCOMPLETE" | "NOT_CONNECTED" | "ERROR";
+  items: readonly AdminCategoryDTO[]; issues: readonly AdminCategoryIssue[];
+  treeIds: readonly string[]; totalCount: number | null;
+  origin: "OFFLINE_FIXTURE" | "READ_ONLY_DATABASE" | "NONE";
+}>;
+export type AdminCategorySourceRow = Pick<CategoryRow, "id" | "parent_id" | "slug" | "status" |
+  "name_en" | "name_zh" | "description_en" | "description_zh" | "sort_order">;
+export type AdminCategorySourceResult = Readonly<{ rows: readonly AdminCategorySourceRow[];
+  totalCount: number | null; allCategories: boolean }>;
 export interface CatalogReadSource {
   /** A future read_only adapter must query catalog_public views for public methods.
    * Admin reads must bind search values, escape LIKE wildcards, whitelist ordering,
@@ -114,6 +130,8 @@ export interface CatalogReadSource {
   getAdminById?(id: string): Promise<PrivateCatalogBundle | null>;
   /** Optional for older B1 sources; a connected Admin filter needs a bounded implementation. */
   listAdminPrimaryCategoryOptions?(): Promise<AdminCategoryOptions>;
+  /** Bounded, unfiltered catalog_private.categories read. Count and rows share one snapshot. */
+  listAdminCategories?(): Promise<AdminCategorySourceResult>;
 }
 export type CatalogPage<T> = Readonly<{ items: readonly T[]; nextCursor: string | null;
   previousCursor?: string | null }>;

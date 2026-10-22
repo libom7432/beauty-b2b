@@ -4,7 +4,8 @@ import { CatalogReadError } from "./errors.ts";
 import { isReadableProductCode } from "./product-code.ts";
 import { toAdminDetail, toAdminList, toPublic } from "./mapping.ts";
 import { ADMIN_UUID, type AdminCursorCodec } from "./admin-cursor.ts";
-import type { AdminCategoryOptions, AdminProductDetailDTO, AdminProductListDTO, PrivateCatalogBundle, PublicCatalogBundle,
+import { inspectAdminCategories, MAX_ADMIN_CATEGORIES } from "./admin-categories.ts";
+import type { AdminCategoryOptions, AdminCategoryReadResult, AdminProductDetailDTO, AdminProductListDTO, PrivateCatalogBundle, PublicCatalogBundle,
   CatalogListQuery, CatalogPage, CatalogReadSource, CatalogScope, CatalogSort, PublicProductDTO,
   SourcePage, SourceQuery } from "./types.ts";
 
@@ -101,6 +102,7 @@ export interface CatalogReadRepository {
   getAdminProductByCode(code: string): Promise<AdminProductDetailDTO>;
   getAdminProductById(id: string): Promise<AdminProductDetailDTO>;
   listAdminPrimaryCategoryOptions(): Promise<AdminCategoryOptions>;
+  listAdminCategories(): Promise<AdminCategoryReadResult>;
 }
 /** Pure core for offline tests. Production wiring must stay in a server-only module. */
 export function createCatalogReadRepository(source: CatalogReadSource, admin: Readonly<{
@@ -138,6 +140,19 @@ export function createCatalogReadRepository(source: CatalogReadSource, admin: Re
       return toPublic(bundle);
     },
     listAdminProducts: (query = {}) => list("admin", query, (normalized) => source.listAdmin(normalized), toAdminList),
+    async listAdminCategories() {
+      await authorize();
+      const unavailable = (state: "NOT_CONNECTED" | "ERROR"): AdminCategoryReadResult =>
+        ({ state, items: [], treeIds: [], issues: [], totalCount: null, origin: "NONE" });
+      if (source.mode === "not_configured" || !source.listAdminCategories) return unavailable("NOT_CONNECTED");
+      let result;
+      try { result = await safeSource(() => source.listAdminCategories!()); }
+      catch { return unavailable("ERROR"); }
+      if (!result || !Array.isArray(result.rows) || result.rows.length > MAX_ADMIN_CATEGORIES + 1)
+        return unavailable("ERROR");
+      return { ...inspectAdminCategories(result),
+        origin: source.mode === "offline" ? "OFFLINE_FIXTURE" : "READ_ONLY_DATABASE" };
+    },
     async listAdminPrimaryCategoryOptions() {
       await authorize();
       configured();

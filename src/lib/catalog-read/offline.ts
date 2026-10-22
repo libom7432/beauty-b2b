@@ -2,7 +2,8 @@ import { decodeCursor } from "./repository-core.ts";
 import { adminBoundaryWitness, type AdminCursorBoundary } from "./admin-cursor.ts";
 import { CatalogReadError } from "./errors.ts";
 import { PUBLIC_CATALOG_PROJECTION } from "./types.ts";
-import type { CatalogReadSource, PrivateCatalogBundle, PublicCatalogBundle, SourceQuery } from "./types.ts";
+import type { CatalogReadSource, CategoryRow, PrivateCatalogBundle, PublicCatalogBundle, SourceQuery } from "./types.ts";
+import { MAX_ADMIN_CATEGORIES } from "./admin-categories.ts";
 
 /** Exact catalog_public view columns. Visibility is applied before any public filter. */
 export function projectPublicCatalogBundle(bundle: PrivateCatalogBundle): PublicCatalogBundle | null {
@@ -106,7 +107,8 @@ function pagePublic(rows: readonly PublicCatalogBundle[], query: SourceQuery) {
 }
 
 /** In-memory private B2 rows. Public methods operate only on projected view-shaped rows. */
-export function createOfflineCatalogSource(fixtures: readonly PrivateCatalogBundle[]): CatalogReadSource {
+export function createOfflineCatalogSource(fixtures: readonly PrivateCatalogBundle[],
+  allAdminCategories?: readonly CategoryRow[]): CatalogReadSource {
   const unique = <T>(values: readonly T[]) => new Set(values).size === values.length;
   if (!unique(fixtures.map((row) => row.product.id)) || !unique(fixtures.map((row) => row.product.product_code)) ||
     !unique(fixtures.map((row) => row.product.slug)) || !unique(fixtures.flatMap((row) => row.variants.map((variant) => variant.sku))))
@@ -139,6 +141,13 @@ export function createOfflineCatalogSource(fixtures: readonly PrivateCatalogBund
     },
     async getAdminByCode(code) { return fixtures.find((bundle) => bundle.product.product_code === code) ?? null; },
     async getAdminById(id) { return fixtures.find((bundle) => bundle.product.id.toLowerCase() === id.toLowerCase()) ?? null; },
+    async listAdminCategories() {
+      const rows = allAdminCategories ?? [...new Map(fixtures.flatMap((bundle) =>
+        bundle.categories.map((category) => [category.id, category] as const))).values()];
+      return { rows: rows.slice(0, MAX_ADMIN_CATEGORIES + 1),
+        totalCount: allAdminCategories ? rows.length : null,
+        allCategories: allAdminCategories !== undefined };
+    },
     async listAdminPrimaryCategoryOptions() {
       const options = new Map<string, { id: string; nameEn: string; nameZh: string }>();
       for (const bundle of fixtures) for (const link of bundle.categoryLinks) {

@@ -2,7 +2,8 @@ import { CatalogReadError } from "./errors.ts";
 import { decodeCursor } from "./repository-core.ts";
 import { adminBoundaryWitness, type AdminCursorBoundary } from "./admin-cursor.ts";
 import { PUBLIC_CATALOG_PROJECTION } from "./types.ts";
-import type { CatalogReadSource, CatalogSort, PrivateCatalogBundle, ProductRow,
+import { MAX_ADMIN_CATEGORIES } from "./admin-categories.ts";
+import type { AdminCategorySourceRow, CatalogReadSource, CatalogSort, PrivateCatalogBundle, ProductRow,
   PublicCatalogBundle, PublicProductViewRow, SourcePage, SourceQuery } from "./types.ts";
 
 /** Pure query boundary for offline tests. Credentials and pg live in postgres-local.ts only. */
@@ -156,6 +157,23 @@ async function hydrate(client: CatalogSelectClient, products: readonly ProductRo
 export function createPostgresCatalogReadSource(snapshot: ReadSnapshot): CatalogReadSource {
   return {
     mode: "read_only",
+    async listAdminCategories() {
+      return snapshot(async (client) => {
+        const counts = await client.select<{ total_count: string }>(
+          `SELECT count(*)::text AS total_count FROM catalog_private.categories`, []);
+        if (counts.length !== 1) throw new CatalogReadError("SOURCE_UNAVAILABLE");
+        const totalCount = Number(counts[0].total_count);
+        if (!Number.isSafeInteger(totalCount) || totalCount < 0)
+          throw new CatalogReadError("SOURCE_UNAVAILABLE");
+        const rows = await client.select<AdminCategorySourceRow>(
+          `SELECT c.id, c.parent_id, c.slug, c.status, c.name_en, c.name_zh,
+            c.description_en, c.description_zh, c.sort_order
+           FROM catalog_private.categories c
+           ORDER BY c.parent_id NULLS FIRST, c.sort_order, c.id LIMIT $1::integer`,
+          [MAX_ADMIN_CATEGORIES + 1]);
+        return { rows, totalCount, allCategories: true };
+      });
+    },
     async listAdmin(query): Promise<SourcePage<PrivateCatalogBundle>> {
       return snapshot(async (client) => {
         let resolved: AdminCursorBoundary | null = null;

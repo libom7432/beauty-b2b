@@ -48,7 +48,7 @@ test("fixture with no catalog grant cannot view products or see catalog navigati
 
 test("placeholder navigation stays read only", async ({ page, context }, testInfo) => {
   await asFixture(context, "editor");
-  for (const [path, title] of [["/admin/categories", "Categories"], ["/admin/collections", "Collections"],
+  for (const [path, title] of [["/admin/collections", "Collections"],
     ["/admin/media", "Media"], ["/admin/imports", "Imports"]] as const) {
     await page.goto(`${fixtureOrigin}${path}`);
     await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();

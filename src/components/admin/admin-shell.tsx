@@ -4,14 +4,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { adminRouteLabel, type AdminNavItem } from "@/lib/admin/navigation";
 import { LogoutForm } from "@/app/admin/logout-form";
+import { AdminUnsavedChangesProvider, useAdminUnsavedChanges } from "./admin-unsaved-changes";
 
 function SidebarContents({ items, pathname, onNavigate, onClose, closeButton }: {
   items: readonly AdminNavItem[]; pathname: string; onNavigate?: () => void;
   onClose?: () => void; closeButton?: React.RefObject<HTMLButtonElement | null>;
 }) {
+  const { confirmNavigation } = useAdminUnsavedChanges();
   return <>
     <div className="admin-sidebar-top">
-      <Link href="/admin" className="admin-brand" onClick={onNavigate}>
+      <Link href="/admin" className="admin-brand"
+        onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); else onNavigate?.(); }}>
         <span className="admin-brand-mark" aria-hidden="true">B.</span>
         <span><strong>BEAUTY B2B</strong><small>ADMIN CONSOLE</small></span>
       </Link>
@@ -22,7 +25,8 @@ function SidebarContents({ items, pathname, onNavigate, onClose, closeButton }: 
       {items.map((item) => {
         const current = pathname === item.href || (item.href !== "/admin" && pathname.startsWith(`${item.href}/`));
         return <Link key={item.href} href={item.href} aria-current={current ? "page" : undefined}
-          className={`admin-nav-link${current ? " admin-nav-link-active" : ""}`} onClick={onNavigate}>
+          className={`admin-nav-link${current ? " admin-nav-link-active" : ""}`}
+          onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); else onNavigate?.(); }}>
           <span>{item.label}</span><span className="admin-nav-number" aria-hidden="true">{item.number}</span>
         </Link>;
       })}
@@ -31,9 +35,10 @@ function SidebarContents({ items, pathname, onNavigate, onClose, closeButton }: 
   </>;
 }
 
-export function AdminShell({ children, items, administrator }: {
+function AdminShellContents({ children, items, administrator }: {
   children: ReactNode; items: readonly AdminNavItem[]; administrator: string;
 }) {
+  const { confirmNavigation } = useAdminUnsavedChanges();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -122,8 +127,8 @@ export function AdminShell({ children, items, administrator }: {
           </button>
           <div>
             <nav aria-label="Breadcrumb" className="admin-breadcrumb">
-              <Link href="/admin">Admin</Link>
-              {pathname !== "/admin" && <><span aria-hidden="true">/</span>{detail ? <><Link href="/admin/products">Products</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : <span aria-current="page">{title}</span>}</>}
+              <Link href="/admin" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Admin</Link>
+              {pathname !== "/admin" && <><span aria-hidden="true">/</span>{detail ? <><Link href="/admin/products" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Products</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : <span aria-current="page">{title}</span>}</>}
             </nav>
             <p className="admin-topbar-title">{title}</p>
           </div>
@@ -133,4 +138,8 @@ export function AdminShell({ children, items, administrator }: {
       <main id="admin-content" className="admin-content">{children}</main>
     </div>
   </div>;
+}
+
+export function AdminShell(props: { children: ReactNode; items: readonly AdminNavItem[]; administrator: string }) {
+  return <AdminUnsavedChangesProvider><AdminShellContents {...props} /></AdminUnsavedChangesProvider>;
 }

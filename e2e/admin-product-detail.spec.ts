@@ -31,7 +31,8 @@ test("Product Code opens a read-only detail with distinct Variant SKUs and DTO f
   for (const privateValue of ["storageKey", "publicUrl", "private/fixture.webp", "private/variant.webp",
     "https://example.invalid/image.webp", "https://example.invalid/variant.webp"])
     expect(rendered).not.toContain(privateValue);
-  await expect(page.getByRole("button", { name: /edit|delete|publish|upload/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit local draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /save|delete|publish|upload/i })).toHaveCount(0);
 });
 
 test("Unicode and slash Product Codes round-trip through the isolated detail route", async ({ page, context }) => {

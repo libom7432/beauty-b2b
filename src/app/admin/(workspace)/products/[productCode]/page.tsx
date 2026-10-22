@@ -1,5 +1,6 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { GuardedAdminLink } from "@/components/admin/admin-unsaved-changes";
+import { ProductEditor } from "@/components/admin/product-editor";
 import { AdminBadge, AdminPageHeader } from "@/components/admin/ui";
 import { ProductDetailPanel, ProductDetailStatePanel } from "@/components/admin/product-detail-panel";
 import { safeProductsReturnHref } from "@/lib/admin/product-detail-navigation";
@@ -27,14 +28,17 @@ export default async function AdminProductDetail({ params, searchParams }: Props
   }
   return <>
     <AdminPageHeader eyebrow="CATALOG / PRODUCTS / DETAIL" title="Product detail"
-      description="Read-only product family information from the connected Catalog source.">
+      description={state.kind === "success"
+        ? "Catalog data is read only. This page offers a local draft editor; changes are never saved to the server."
+        : "Read-only product family information from the connected Catalog source."}>
       <AdminBadge tone={state.kind === "success" ? "positive" : state.kind === "source_unavailable" ? "warning" : "neutral"}>
-        {state.kind === "success" ? "Read only" : state.kind === "not_connected" ? "Not Connected" :
+        {state.kind === "success" ? "Local draft only" : state.kind === "not_connected" ? "Not Connected" :
           state.kind === "not_found" ? "Not Found" : "Unavailable"}
       </AdminBadge>
     </AdminPageHeader>
-    <p className="mb-5"><Link href={returnHref} className="admin-inline-link">← Back to Products</Link></p>
-    {state.kind === "success" ? <ProductDetailPanel product={toAdminProductDetailView(state.product)} /> :
+    <p className="mb-5"><GuardedAdminLink href={returnHref} className="admin-inline-link">← Back to Products</GuardedAdminLink></p>
+    {state.kind === "success" ? <><ProductDetailPanel product={toAdminProductDetailView(state.product)} />
+      <ProductEditor key={state.product.basic.id} product={toAdminProductDetailView(state.product)} /></> :
       <ProductDetailStatePanel state={state.kind} />}
   </>;
 }

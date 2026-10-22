@@ -91,7 +91,12 @@ function row(n: number, status: "draft" | "published" | "retired"): PrivateCatal
         storage_key: "private/variant.webp", public_url: "https://example.invalid/variant.webp",
         role: "variant" as const, status: "draft" as const, sort_order: 1,
         width: null, height: null, format: "webp" as const, alt_en: "Variant view", alt_zh: "",
-        created_at: date, updated_at: date }] : [])] };
+        created_at: date, updated_at: date },
+        { id: id(n + 500), product_id: productId, variant_id: null,
+          storage_key: "private/detail.webp", public_url: "https://example.invalid/detail.webp",
+          role: "detail" as const, status: "published" as const, sort_order: 2,
+          width: null, height: null, format: "webp" as const, alt_en: "Side view", alt_zh: "侧面",
+          created_at: date, updated_at: date }] : [])] };
 }
 const sample = createOfflineCatalogSource([row(1, "draft"), row(2, "published"), row(3, "retired")]);
 const querySample = createOfflineCatalogSource(Array.from({ length: 45 }, (_, index) =>

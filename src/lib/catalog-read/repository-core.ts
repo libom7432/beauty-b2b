@@ -5,9 +5,12 @@ import { isReadableProductCode } from "./product-code.ts";
 import { toAdminDetail, toAdminList, toPublic } from "./mapping.ts";
 import { ADMIN_UUID, type AdminCursorCodec } from "./admin-cursor.ts";
 import { inspectAdminCategories, MAX_ADMIN_CATEGORIES } from "./admin-categories.ts";
+import { createAdminCollectionsReader } from "./admin-collections.ts";
+import type { CollectionCursorCodec } from "./collections-cursor.ts";
 import type { AdminCategoryOptions, AdminCategoryReadResult, AdminProductDetailDTO, AdminProductListDTO, PrivateCatalogBundle, PublicCatalogBundle,
   CatalogListQuery, CatalogPage, CatalogReadSource, CatalogScope, CatalogSort, PublicProductDTO,
-  SourcePage, SourceQuery } from "./types.ts";
+  SourcePage, SourceQuery, AdminCollectionListQuery, AdminCollectionListResult,
+  AdminCollectionDetailResult, AdminCollectionMemberQuery, AdminCollectionMemberListResult } from "./types.ts";
 
 export const MAX_PAGE_SIZE = 50;
 const DEFAULT_PAGE_SIZE = 20;
@@ -103,11 +106,16 @@ export interface CatalogReadRepository {
   getAdminProductById(id: string): Promise<AdminProductDetailDTO>;
   listAdminPrimaryCategoryOptions(): Promise<AdminCategoryOptions>;
   listAdminCategories(): Promise<AdminCategoryReadResult>;
+  listAdminCollections(query?: AdminCollectionListQuery): Promise<AdminCollectionListResult>;
+  getAdminCollectionById(id: string): Promise<AdminCollectionDetailResult>;
+  listAdminCollectionMembers(id: string, query?: AdminCollectionMemberQuery):
+    Promise<AdminCollectionMemberListResult>;
 }
 /** Pure core for offline tests. Production wiring must stay in a server-only module. */
 export function createCatalogReadRepository(source: CatalogReadSource, admin: Readonly<{
   session: unknown; dependencies: CatalogAuthDependencies }> | null = null,
-  adminCursorCodec: AdminCursorCodec | null = null): CatalogReadRepository {
+  adminCursorCodec: AdminCursorCodec | null = null,
+  collectionCursorCodec: CollectionCursorCodec | null = null): CatalogReadRepository {
   const authorize = async () => {
     if (!admin) throw new CatalogReadError("FORBIDDEN");
     try { await requireCatalogPermission(admin.session, "catalog.read", admin.dependencies); }
@@ -130,7 +138,9 @@ export function createCatalogReadRepository(source: CatalogReadSource, admin: Re
       ...(scope === "admin" && result.hasPrevious
         ? { previousCursor: encodeCursor(result.rows[0], scope, query, adminCursorCodec, "before") } : {}) };
   };
+  const collections = createAdminCollectionsReader(source, authorize, collectionCursorCodec);
   return {
+    ...collections,
     listPublishedProducts: (query = {}) => list("public", query, (normalized) => source.listPublished(normalized), toPublic),
     async getPublishedProductBySlug(slug) {
       if (!slugPattern.test(slug) || slug.length > 200) return failInput();

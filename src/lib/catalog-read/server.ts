@@ -3,7 +3,7 @@ import { createCatalogReadRepository } from "./repository-core.ts";
 import { notConfiguredCatalogSource } from "./offline.ts";
 import { createAdminAuthClient } from "../admin/supabase-server.ts";
 import { adminDependencies } from "../admin/server-access.ts";
-import { getServerAdminCursorCodec } from "./server-cursor.ts";
+import { getServerAdminCursorCodec, getServerCollectionCursorCodec } from "./server-cursor.ts";
 import { getSupabaseCatalogReadSource } from "./postgres-supabase.ts";
 import { CatalogReadError } from "./errors.ts";
 
@@ -19,5 +19,5 @@ export async function createServerCatalogReadRepository() {
   }
   return createCatalogReadRepository(source,
     client ? { session: client, dependencies: adminDependencies(client) } : null,
-    getServerAdminCursorCodec());
+    getServerAdminCursorCodec(), getServerCollectionCursorCodec());
 }

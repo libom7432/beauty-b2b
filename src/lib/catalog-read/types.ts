@@ -117,6 +117,65 @@ export type AdminCategorySourceRow = Pick<CategoryRow, "id" | "parent_id" | "slu
   "name_en" | "name_zh" | "description_en" | "description_zh" | "sort_order">;
 export type AdminCategorySourceResult = Readonly<{ rows: readonly AdminCategorySourceRow[];
   totalCount: number | null; allCategories: boolean }>;
+
+/** B5-S2 draft columns only. Source implementations may add private fields; DTO mapping must not. */
+export type AdminCollectionSourceRow = Readonly<{ id: string; slug: string; name_en: string;
+  name_zh: string; description_en: string; description_zh: string; status: CatalogStatus;
+  sort_order: number; published_at: string | null; updated_at: string }>;
+export type AdminCollectionMemberSourceRow = Readonly<{ collection_id: string; product_id: string;
+  sort_order: number; product_code: string | null; name_en: string | null;
+  name_zh: string | null; product_status: CatalogStatus | null }>;
+export type AdminCollectionSummary = Readonly<{ id: string; slug: string; nameEn: string;
+  nameZh: string; status: CatalogStatus; sortOrder: number;
+  publishedAt: string | null; updatedAt: string }>;
+export type AdminCollectionDetail = AdminCollectionSummary & Readonly<{
+  descriptionEn: string; descriptionZh: string }>;
+export type AdminCollectionMember = Readonly<{ productId: string; productCode: string | null;
+  nameEn: string | null; nameZh: string | null; productStatus: CatalogStatus | null;
+  sortOrder: number }>;
+export type AdminCollectionIssue = Readonly<{ code: "INVALID_ROW" | "DUPLICATE_ID" |
+  "UNSORTED" | "BOUNDARY_MISMATCH" | "OVER_LIMIT" | "SOURCE_INCOMPLETE" |
+  "MISSING_PRODUCT" | "ID_MISMATCH" | "STALE_CURSOR" | "MISSING_WINDOW_EVIDENCE" |
+  "WINDOW_MISMATCH" | "NAVIGATION_UNAVAILABLE"; id: string | null }>;
+export type AdminCollectionReadState = "COMPLETE" | "INCOMPLETE" | "NOT_CONNECTED" |
+  "ERROR" | "NOT_FOUND" | "EMPTY_PAGE";
+export type AdminCollectionOrigin = "OFFLINE_FIXTURE" | "READ_ONLY_DATABASE" | "NONE";
+export type AdminCollectionListResult = Readonly<{ state: AdminCollectionReadState;
+  items: readonly AdminCollectionSummary[]; issues: readonly AdminCollectionIssue[];
+  nextCursor: string | null; previousCursor: string | null; origin: AdminCollectionOrigin }>;
+export type AdminCollectionDetailResult = Readonly<{ state: AdminCollectionReadState;
+  item: AdminCollectionDetail | null; issues: readonly AdminCollectionIssue[];
+  origin: AdminCollectionOrigin }>;
+export type AdminCollectionMemberListResult = Readonly<{ state: AdminCollectionReadState;
+  items: readonly AdminCollectionMember[]; issues: readonly AdminCollectionIssue[];
+  nextCursor: string | null; previousCursor: string | null; origin: AdminCollectionOrigin }>;
+export type AdminCollectionListQuery = Readonly<{ limit?: number; cursor?: string;
+  status?: CatalogStatus; direction?: "after" | "before" }>;
+export type AdminCollectionMemberQuery = Readonly<{ limit?: number; cursor?: string;
+  direction?: "after" | "before" }>;
+export type CollectionSourceQuery = Readonly<{ limit: number; direction: "after" | "before";
+  boundary: Readonly<{ sortOrder: number; id: string }> | null; status?: CatalogStatus;
+  collectionId?: string; includeBoundary: boolean }>;
+/** The source must filter, resolve the signed boundary, keyset, sort, and fetch
+ * at most limit+1 rows in one statement or one READ ONLY REPEATABLE READ transaction.
+ * Lists sort by (sort_order, collection UUID); members by (sort_order, product UUID).
+ * A matching boundary row must be checked in that same snapshot; includeBoundary
+ * changes the keyset comparison to inclusive only for a signed recovery cursor.
+ * The window records the requested SQL row cap, actual returned row count, and
+ * whether that bounded query exhausted its eligible rows. A missing or inconsistent
+ * window means INCOMPLETE. A query failure means ERROR. The Repository checks the
+ * window against rows; it cannot independently see rows omitted by a broken adapter.
+ * A future SQL adapter must prove the same-snapshot behavior in PostgreSQL tests.
+ * boundary is null without a cursor, otherwise the matching current row in the
+ * current scope or null when deleted/moved. For before, return the nearest rows
+ * in ascending display order. includeBoundary is only for signed empty-page recovery. */
+export type CollectionSourcePage<T> = Readonly<{ rows: readonly T[];
+  window: Readonly<{ requestedRowCount: number; returnedRowCount: number; exhausted: boolean }>;
+  boundary: Readonly<{ sortOrder: number; id: string }> | null }>;
+export type CollectionMemberSourcePage = CollectionSourcePage<AdminCollectionMemberSourceRow> &
+  Readonly<{ collectionExists: boolean }>;
+export type CollectionSourceDetail = Readonly<{ row: AdminCollectionSourceRow | null;
+  complete: boolean }>;
 export interface CatalogReadSource {
   /** A future read_only adapter must query catalog_public views for public methods.
    * Admin reads must bind search values, escape LIKE wildcards, whitelist ordering,
@@ -132,6 +191,10 @@ export interface CatalogReadSource {
   listAdminPrimaryCategoryOptions?(): Promise<AdminCategoryOptions>;
   /** Bounded, unfiltered catalog_private.categories read. Count and rows share one snapshot. */
   listAdminCategories?(): Promise<AdminCategorySourceResult>;
+  /** B5 draft tables are not deployed; absent methods mean NOT_CONNECTED. */
+  listAdminCollections?(query: CollectionSourceQuery): Promise<CollectionSourcePage<AdminCollectionSourceRow>>;
+  getAdminCollectionById?(id: string): Promise<CollectionSourceDetail>;
+  listAdminCollectionMembers?(query: CollectionSourceQuery): Promise<CollectionMemberSourcePage>;
 }
 export type CatalogPage<T> = Readonly<{ items: readonly T[]; nextCursor: string | null;
   previousCursor?: string | null }>;

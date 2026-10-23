@@ -48,6 +48,8 @@ import "server-only";
 import { cookies } from "next/headers";
 import { createCatalogReadRepository } from "./repository-core.ts";
 import { createAdminCursorCodec } from "./admin-cursor.ts";
+import { createCollectionCursorCodec } from "./collections-cursor.ts";
+import { createCollectionsFixtureSource } from "./collections-fixture-source.ts";
 import { createOfflineCatalogSource, notConfiguredCatalogSource } from "./offline.ts";
 import type { PrivateCatalogBundle } from "./types.ts";
 const date = "2026-10-01T00:00:00.000Z";
@@ -163,6 +165,7 @@ export async function createServerCatalogReadRepository() {
   const role = cookieStore.get("admin-ui-fixture")?.value;
   const state = cookieStore.get("catalog-read-fixture")?.value;
   const source = state === "success" ? sample : state === "query" ? querySample :
+    state?.startsWith("collections") ? createCollectionsFixtureSource(state) :
     state === "category" ? categorySource : state === "category-empty" ? categoryEmpty :
     state === "category-incomplete" ? categoryIncomplete : state === "category-cycle" ? categoryCycle :
     state === "category-duplicate" ? categoryDuplicate : state === "category-truncated" ? categoryTruncated :
@@ -186,7 +189,8 @@ export async function createServerCatalogReadRepository() {
             ? ["catalog.read", "catalog.import.receipt.read"] : ["catalog.read"] };
       } },
     },
-  }, createAdminCursorCodec(process.env.ADMIN_CATALOG_CURSOR_SIGNING_KEY ?? ""));
+  }, createAdminCursorCodec(process.env.ADMIN_CATALOG_CURSOR_SIGNING_KEY ?? ""),
+    createCollectionCursorCodec(process.env.ADMIN_CATALOG_CURSOR_SIGNING_KEY ?? ""));
 }
 `;
 
@@ -212,6 +216,8 @@ export async function startAdminFixture() {
     writeFileSync(join(fixtureRoot, "src/lib/admin/server-access.ts"), accessFixture);
     writeFileSync(join(fixtureRoot, "src/lib/admin/ui-identity.ts"), identityFixture);
     writeFileSync(join(fixtureRoot, "src/lib/catalog-read/server.ts"), catalogFixture);
+    cpSync(join(repositoryRoot, "e2e/support/collections-fixture-source.ts"),
+      join(fixtureRoot, "src/lib/catalog-read/collections-fixture-source.ts"));
     const categoryRefreshRoute = join(fixtureRoot, "src/app/admin/(workspace)/category-refresh-fixture");
     mkdirSync(categoryRefreshRoute, { recursive: true });
     cpSync(join(repositoryRoot, "e2e/support/category-refresh-page.tsx"), join(categoryRefreshRoute, "page.tsx"));

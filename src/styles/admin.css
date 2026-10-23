@@ -75,6 +75,22 @@
 .admin-category-limit { grid-column: 1 / -1; margin: 0 !important; font-size: 11px !important; }
 .admin-product-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 13px; padding: 15px 24px; border-top: 1px solid var(--admin-line); font-size: 11px; font-weight: 700; }
 .admin-product-pagination [aria-disabled="true"] { color: #9da69e; }
+.admin-collection-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 18px 24px; border-bottom: 1px solid var(--admin-line); }
+.admin-collection-filters label { display: grid; gap: 7px; color: #59665c; font-size: 11px; font-weight: 700; }
+.admin-collection-filters select { min-width: 150px; height: 39px; padding: 0 10px; border: 1px solid #cbd4ca; border-radius: 7px; background: #fff; color: var(--admin-ink); }
+.admin-collection-filters button { min-height: 39px; padding: 0 13px; border: 1px solid #45634d; border-radius: 7px; background: #45634d; color: #fff; font-size: 11px; font-weight: 700; }
+.admin-collection-filters a { min-height: 39px; display: inline-flex; align-items: center; color: #45634d; font-size: 11px; font-weight: 700; }
+.admin-collection-filters p { flex-basis: 100%; margin: 0; color: var(--admin-muted); font-size: 11px; }
+.admin-collection-state { display: grid; gap: 9px; justify-items: center; padding: 50px 20px; text-align: center; }
+.admin-collection-state h3 { margin: 0; font-size: 13px; }
+.admin-collection-state p { max-width: 430px; margin: 0; color: var(--admin-muted); }
+.admin-collection-details { max-width: 260px; }
+.admin-collection-details summary { color: #42644b; cursor: pointer; font-weight: 700; }
+.admin-collection-details dl { display: grid; gap: 8px; margin: 10px 0; }
+.admin-collection-details dt { color: var(--admin-muted); }
+.admin-collection-details dd { margin: 0; overflow-wrap: anywhere; }
+.admin-collection-details p { margin: 0; color: var(--admin-muted); font-size: 11px; }
+.admin-collection-filters :is(select, button, a):focus-visible, .admin-collection-details summary:focus-visible { outline: 2px solid #285e3a; outline-offset: 2px; }
 .admin-table-scroll { max-width: 100%; overflow-x: auto; }
 .admin-table { width: 100%; min-width: 900px; border-collapse: collapse; text-align: left; }
 .admin-table th { padding: 13px 20px; border-bottom: 1px solid var(--admin-line); background: #f7f9f6; color: #738075; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; white-space: nowrap; }

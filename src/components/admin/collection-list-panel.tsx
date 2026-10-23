@@ -54,8 +54,9 @@ export function CollectionListPanel({ result, query }: {
           <dl><div><dt>Collection ID</dt><dd>{row.id}</dd></div>
             <div><dt>Chinese name</dt><dd>{row.nameZh.trim() || "Unavailable"}</dd></div>
             <div><dt>Published at</dt><dd>{row.publishedAt?.slice(0, 10) || "Not published"}</dd></div></dl>
-          <p>Read-only list information. Full collection details are not connected.</p>
-        </details></td>
+          <p>Read-only list information.</p>
+        </details><Link href={`/admin/collections/${row.id}`} className="admin-inline-link">
+          Open full details for {row.nameEn.trim() || row.slug}</Link></td>
       </tr>)}
       {rows.length === 0 && <tr><td colSpan={6}>
         {state === "COMPLETE" ? <AdminEmptyState title="No collections"

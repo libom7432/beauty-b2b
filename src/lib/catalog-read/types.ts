@@ -121,7 +121,7 @@ export type AdminCategorySourceResult = Readonly<{ rows: readonly AdminCategoryS
 /** B5-S2 draft columns only. Source implementations may add private fields; DTO mapping must not. */
 export type AdminCollectionSourceRow = Readonly<{ id: string; slug: string; name_en: string;
   name_zh: string; description_en: string; description_zh: string; status: CatalogStatus;
-  sort_order: number; published_at: string | null; updated_at: string }>;
+  sort_order: number; published_at: string | null; created_at: string; updated_at: string }>;
 export type AdminCollectionMemberSourceRow = Readonly<{ collection_id: string; product_id: string;
   sort_order: number; product_code: string | null; name_en: string | null;
   name_zh: string | null; product_status: CatalogStatus | null }>;
@@ -129,7 +129,7 @@ export type AdminCollectionSummary = Readonly<{ id: string; slug: string; nameEn
   nameZh: string; status: CatalogStatus; sortOrder: number;
   publishedAt: string | null; updatedAt: string }>;
 export type AdminCollectionDetail = AdminCollectionSummary & Readonly<{
-  descriptionEn: string; descriptionZh: string }>;
+  descriptionEn: string; descriptionZh: string; createdAt: string }>;
 export type AdminCollectionMember = Readonly<{ productId: string; productCode: string | null;
   nameEn: string | null; nameZh: string | null; productStatus: CatalogStatus | null;
   sortOrder: number }>;

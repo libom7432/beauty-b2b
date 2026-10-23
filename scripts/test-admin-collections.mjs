@@ -8,10 +8,11 @@ import { notConfiguredCatalogSource } from "../src/lib/catalog-read/offline.ts";
 
 const id = (n) => `${String(n).padStart(8, "0")}-0000-4000-8000-000000000000`;
 const date = "2026-10-01T00:00:00.000Z";
+const created = "2026-09-01T00:00:00.000Z";
 const collection = (n, status = "published", order = n) => ({ id: id(n), slug: `group-${n}`,
   name_en: `Group ${n}`, name_zh: `集合 ${n}`, description_en: "English description",
   description_zh: "中文描述", status, sort_order: order,
-  published_at: status === "published" ? date : null, updated_at: date });
+  published_at: status === "published" ? date : null, created_at: created, updated_at: date });
 const member = (n, collectionId = id(1), status = "published", order = n) => ({
   collection_id: collectionId, product_id: id(n), sort_order: order,
   product_code: `编码/${n}`, name_en: `Product ${n}`, name_zh: `商品 ${n}`,
@@ -112,9 +113,11 @@ test("all three statuses are visible to Admin and DTOs are explicit allowlists",
     ["id", "slug", "nameEn", "nameZh", "status", "sortOrder", "publishedAt", "updatedAt"].sort());
   const detail = await reader.getAdminCollectionById(id(1));
   assert.equal(detail.item.descriptionEn, "English description");
+  assert.equal(detail.item.createdAt, created);
+  assert.notEqual(detail.item.createdAt, detail.item.updatedAt);
   assert.deepEqual(Object.keys(detail.item).sort(),
     ["id", "slug", "nameEn", "nameZh", "descriptionEn", "descriptionZh", "status",
-      "sortOrder", "publishedAt", "updatedAt"].sort());
+      "sortOrder", "publishedAt", "createdAt", "updatedAt"].sort());
   const members = await reader.listAdminCollectionMembers(id(1));
   assert.equal(members.items[0].productCode, "编码/10");
   assert.equal(members.items[0].productStatus, "published");
@@ -325,6 +328,25 @@ test("detail invalid source row, mismatch and incomplete read are reported", asy
       .getAdminCollectionById(id(1));
     assert.equal(result.state, state);
     assert.equal(result.issues[0].code, problem);
+  }
+});
+
+test("missing or invalid created_at cannot yield COMPLETE or a fabricated detail time", async () => {
+  const missing = { ...collection(1) };
+  delete missing.created_at;
+  for (const row of [missing,
+    { ...collection(1), created_at: null },
+    { ...collection(1), created_at: "not-a-date" },
+    { ...collection(1), created_at: "2026-02-30T00:00:00.000Z" },
+    { ...collection(1), created_at: "2026-02-29T00:00:00.000Z" }]) {
+    const reader = repo(fixtureSource([row]).source);
+    const detail = await reader.getAdminCollectionById(id(1));
+    assert.equal(detail.state, "INCOMPLETE");
+    assert.equal(detail.item, null);
+    assert.deepEqual(detail.issues.map((entry) => entry.code), ["INVALID_ROW"]);
+    const list = await reader.listAdminCollections();
+    assert.equal(list.state, "INCOMPLETE");
+    assert.ok(list.issues.some((entry) => entry.code === "INVALID_ROW"));
   }
 });
 

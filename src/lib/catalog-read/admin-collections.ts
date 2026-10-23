@@ -16,6 +16,8 @@ const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 const timestamp = (value: unknown): value is string =>
   typeof value === "string" && UTC.test(value) && Number.isFinite(Date.parse(value));
+const createdTimestamp = (value: unknown): value is string =>
+  timestamp(value) && new Date(value).toISOString().slice(0, 19) === value.slice(0, 19);
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const compareBoundary = (a: CollectionBoundary, b: CollectionBoundary) =>
   a.sortOrder - b.sortOrder || compare(a.id.toLowerCase(), b.id.toLowerCase());
@@ -58,14 +60,14 @@ function safeCollection(row: AdminCollectionSourceRow): AdminCollectionDetail | 
     typeof row.slug !== "string" || row.slug.length > 200 || !SLUG.test(row.slug) ||
     ![row.name_en, row.name_zh, row.description_en, row.description_zh]
       .every((value) => typeof value === "string") || !STATUS.has(row.status) ||
-    !INT32(row.sort_order) || !timestamp(row.updated_at) ||
+    !INT32(row.sort_order) || !createdTimestamp(row.created_at) || !timestamp(row.updated_at) ||
     row.published_at !== null && !timestamp(row.published_at) ||
     row.status === "published" && (row.published_at === null ||
       !row.name_en.trim() || !row.name_zh.trim())) return null;
   return { id: row.id, slug: row.slug, nameEn: row.name_en, nameZh: row.name_zh,
     descriptionEn: row.description_en, descriptionZh: row.description_zh,
     status: row.status, sortOrder: row.sort_order,
-    publishedAt: row.published_at, updatedAt: row.updated_at };
+    publishedAt: row.published_at, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 function safeMember(row: AdminCollectionMemberSourceRow): AdminCollectionMember | null {

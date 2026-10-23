@@ -4,6 +4,7 @@ import type { CatalogReadSource, AdminCollectionSourceRow, CollectionSourceQuery
 
 const id = (n: number) => `${String(n).padStart(8, "0")}-0000-4000-8000-000000000000`;
 const updated = "2026-10-01T00:00:00.000Z";
+const created = "2026-09-01T00:00:00.000Z";
 const rows: AdminCollectionSourceRow[] = Array.from({ length: 32 }, (_, index) => {
   const number = index + 1;
   const status = number % 3 === 1 ? "draft" : number % 3 === 2 ? "published" : "retired";
@@ -11,7 +12,7 @@ const rows: AdminCollectionSourceRow[] = Array.from({ length: 32 }, (_, index) =
     name_en: `Collection ${number}`, name_zh: `集合 ${number}`,
     description_en: "Test description", description_zh: "测试描述", status,
     sort_order: number, published_at: status === "published" ? updated : null,
-    updated_at: updated };
+    created_at: created, updated_at: updated };
 });
 const compare = (a: AdminCollectionSourceRow, b: AdminCollectionSourceRow) =>
   a.sort_order - b.sort_order || a.id.localeCompare(b.id);

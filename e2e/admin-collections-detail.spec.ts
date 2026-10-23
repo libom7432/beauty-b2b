@@ -18,17 +18,28 @@ test("detail requires catalog.read and invalid UUID never reveals collection dat
   await page.goto(`${fixtureOrigin}/admin/collections/not-a-uuid`);
   await expect(page.getByText("This page could not be found")).toBeVisible();
   await expect(page.getByText("Collection 1")).toHaveCount(0);
+  await expect(page.locator(".admin-topbar-title")).toHaveCount(0);
+  await page.goto(`${detailUrl(1)}/extra`);
+  await expect(page.getByText("This page could not be found")).toBeVisible();
+  await expect(page.locator(".admin-topbar-title")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Collections" })).toHaveCount(0);
 });
 
 test("list link opens a read-only detail and fixed return link preserves safe fields", async ({ page, context }) => {
   await fixtureCookies(context, "collections");
   await page.goto(`${fixtureOrigin}/admin/collections`);
+  await expect(page.locator(".admin-topbar-title")).toHaveText("Collections");
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" }).locator('[aria-current="page"]')).toHaveText("Collections");
   const list = page.getByRole("region", { name: "Collection list" });
   const link = list.getByRole("link", { name: "Open full details for Collection 1", exact: true });
   await link.focus();
   await expect(link).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/admin/collections/${id(1)}$`));
+  await expect(page.locator(".admin-topbar-title")).toHaveText("Collection detail");
+  const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+  await expect(breadcrumb.getByRole("link", { name: "Collections" })).toHaveAttribute("href", "/admin/collections");
+  await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText("Detail");
   const detail = page.getByRole("region", { name: "Collection detail information" });
   for (const text of [id(1), "collection-1", "Collection 1", "集合 1", "2026-09-01T00:00:00.000Z",
     "2026-10-01T00:00:00.000Z", "Not provided", "Not published", "TEST DATA"])
@@ -58,7 +69,10 @@ test("filtered list, detail, browser history and refresh keep their own URL stat
   await expect(page).toHaveURL(new RegExp(`/admin/collections/${id(2)}$`));
   await page.reload();
   await expect(page.getByText("Draft Product", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "Back to Collections" }).click();
+  const breadcrumbLink = page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Collections" });
+  await breadcrumbLink.focus();
+  await expect(breadcrumbLink).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/admin\/collections$/);
 });
 
@@ -141,6 +155,7 @@ test("long names, slug and product code wrap on a mobile viewport", async ({ pag
   await fixtureCookies(context, "collections-long");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(detailUrl(1));
+  await expect(page.locator(".admin-topbar-title")).toHaveText("Collection detail");
   await expect(page.getByText(/long-a{100}/)).toBeVisible();
   await expect(page.getByText(/CODE-X{100}/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

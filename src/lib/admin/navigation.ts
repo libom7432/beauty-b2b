@@ -20,7 +20,15 @@ export function visibleAdminNavigation(permissions: readonly CatalogPermission[]
   return ADMIN_NAVIGATION.filter((item) => !item.permission || permissions.includes(item.permission));
 }
 
+// Matches the UUID syntax used by the collection detail route, without importing its server-only cursor module.
+const ADMIN_COLLECTION_DETAIL_PATH = /^\/admin\/collections\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isAdminCollectionDetailPath(pathname: string): boolean {
+  return ADMIN_COLLECTION_DETAIL_PATH.test(pathname);
+}
+
 export function adminRouteLabel(pathname: string): string {
   if (pathname.startsWith("/admin/products/")) return "Product detail";
+  if (isAdminCollectionDetailPath(pathname)) return "Collection detail";
   return ADMIN_NAVIGATION.find((item) => item.href === pathname)?.label ?? "Admin";
 }

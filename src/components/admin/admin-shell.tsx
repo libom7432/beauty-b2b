@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { adminRouteLabel, type AdminNavItem } from "@/lib/admin/navigation";
+import { adminRouteLabel, isAdminCollectionDetailPath, type AdminNavItem } from "@/lib/admin/navigation";
 import { LogoutForm } from "@/app/admin/logout-form";
 import { AdminUnsavedChangesProvider, useAdminUnsavedChanges } from "./admin-unsaved-changes";
 
@@ -47,7 +47,8 @@ function AdminShellContents({ children, items, administrator }: {
   const restoreFocus = useRef(false);
   const previousPathname = useRef(pathname);
   const title = adminRouteLabel(pathname);
-  const detail = pathname.startsWith("/admin/products/");
+  const productDetail = pathname.startsWith("/admin/products/");
+  const collectionDetail = isAdminCollectionDetailPath(pathname);
 
   const closeMenu = useCallback((restore: boolean) => {
     restoreFocus.current = restore;
@@ -128,7 +129,7 @@ function AdminShellContents({ children, items, administrator }: {
           <div>
             <nav aria-label="Breadcrumb" className="admin-breadcrumb">
               <Link href="/admin" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Admin</Link>
-              {pathname !== "/admin" && <><span aria-hidden="true">/</span>{detail ? <><Link href="/admin/products" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Products</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : <span aria-current="page">{title}</span>}</>}
+              {pathname !== "/admin" && <><span aria-hidden="true">/</span>{productDetail ? <><Link href="/admin/products" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Products</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : collectionDetail ? <><Link href="/admin/collections" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Collections</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : <span aria-current="page">{title}</span>}</>}
             </nav>
             <p className="admin-topbar-title">{title}</p>
           </div>

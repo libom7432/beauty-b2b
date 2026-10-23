@@ -162,3 +162,127 @@ test("long names, slug and product code wrap on a mobile viewport", async ({ pag
   const table = page.locator(".admin-table-scroll");
   expect(await table.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
 });
+
+test("browser-only basic draft validates fields, reverts cleanly and never writes", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (!["GET", "HEAD"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`);
+  });
+  await page.goto(detailUrl(1));
+  const editor = page.getByRole("region", { name: "Local collection basic editor" });
+  await expect(editor).toContainText("LOCAL DEMO / NOT CONNECTED");
+  await expect(editor.getByText("No local changes")).toBeVisible();
+  await editor.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(editor.getByLabel("Slug")).toHaveValue("collection-1");
+  await expect(editor.getByLabel("Collection UUID")).toHaveCount(0);
+  await editor.getByLabel("English name").fill("");
+  await editor.getByLabel("Status").selectOption("published");
+  await editor.getByRole("button", { name: "Check draft" }).click();
+  await expect(editor.getByText("Local fields: INVALID")).toBeVisible();
+  await expect(editor.getByText("Full database and publication checks: INVALID")).toBeVisible();
+  await expect(editor.getByText(/name_en: REQUIRED_FOR_PUBLICATION/)).toBeVisible();
+  await editor.getByLabel("English name").fill("Local only");
+  await editor.getByRole("button", { name: "Check draft" }).click();
+  await expect(editor.getByText("Local fields: VALID")).toBeVisible();
+  await expect(editor.getByText("Full database and publication checks: NOT_VERIFIED")).toBeVisible();
+  await expect(editor.getByText(/Slug global uniqueness: NOT_VERIFIED/)).toBeVisible();
+  await editor.getByRole("button", { name: "Discard changes" }).click();
+  await expect(editor.getByText("No local changes")).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Edit local draft" })).toBeVisible();
+  expect(writes).toEqual([]);
+  await page.reload();
+  await editor.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(editor.getByLabel("English name")).toHaveValue("Collection 1");
+});
+
+test("published slug remains locked after local Draft and retired is read only", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(detailUrl(2));
+  const editor = page.getByRole("region", { name: "Local collection basic editor" });
+  await editor.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(editor.getByLabel("Slug")).toHaveAttribute("readonly", "");
+  await editor.getByLabel("Status").selectOption("draft");
+  await expect(editor.getByLabel("Slug")).toHaveAttribute("readonly", "");
+  await editor.getByRole("button", { name: "Discard changes" }).click();
+  await page.goto(detailUrl(3));
+  const retired = page.getByRole("region", { name: "Local collection basic editor" });
+  await expect(retired.getByText("Retired is terminal. All fields are read only.")).toBeVisible();
+  await expect(retired.getByRole("button", { name: "Edit local draft" })).toHaveCount(0);
+});
+
+test("dirty draft guards list and member navigation; refresh restores source", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(detailUrl(1));
+  const editor = page.getByRole("region", { name: "Local collection basic editor" });
+  await editor.getByRole("button", { name: "Edit local draft" }).click();
+  await editor.getByLabel("English name").fill("Unsaved name");
+  await expect(editor.getByText("Unsaved local changes")).toBeVisible();
+  expect(await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  })).toBe(true);
+  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.dismiss(); });
+  await page.getByRole("link", { name: "Back to Collections" }).click();
+  await expect(page).toHaveURL(new RegExp(`/admin/collections/${id(1)}$`));
+  await expect(editor.getByLabel("English name")).toHaveValue("Unsaved name");
+  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.dismiss(); });
+  await page.getByRole("region", { name: "Associated products" }).getByRole("link", { name: "Next" }).click();
+  await expect(editor.getByLabel("English name")).toHaveValue("Unsaved name");
+  page.once("dialog", async (dialog) => { await dialog.accept(); });
+  await page.reload();
+  const refreshed = page.getByRole("region", { name: "Local collection basic editor" });
+  await refreshed.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(refreshed.getByLabel("English name")).toHaveValue("Collection 1");
+});
+
+test("mounted source replacement preserves dirty draft and blocks checking until discard", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(`${fixtureOrigin}/admin/collection-basic-refresh-fixture`);
+  const controls = page.getByRole("group", { name: "Fixture collection source updates" });
+  const editor = page.getByRole("region", { name: "Local collection basic editor" });
+  await editor.getByRole("button", { name: "Edit local draft" }).click();
+  await controls.getByRole("button", { name: "Same values, new object" }).click();
+  await expect(editor.getByRole("alert")).toHaveCount(0);
+  await editor.getByLabel("English name").fill("Unsaved local value");
+  await controls.getByRole("button", { name: "Update source" }).click();
+  await expect(editor.getByLabel("English name")).toHaveValue("Unsaved local value");
+  await expect(editor.getByText("Unsaved local changes")).toBeVisible();
+  await expect(editor.getByRole("alert")).toContainText("Source data has changed");
+  await expect(editor.getByRole("button", { name: "Check draft" })).toBeDisabled();
+  await editor.getByRole("button", { name: "Discard changes" }).click();
+  await expect(editor.getByText("No local changes")).toBeVisible();
+  await editor.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(editor.getByLabel("English name")).toHaveValue("Server changed collection");
+  await editor.getByLabel("English name").fill("Second unsaved value");
+  await controls.getByRole("button", { name: "Disconnect source" }).click();
+  await expect(editor.getByLabel("English name")).toHaveValue("Second unsaved value");
+  await expect(editor.getByRole("alert")).toBeVisible();
+  await editor.getByRole("button", { name: "Discard changes" }).click();
+  await expect(page.getByRole("region", { name: "Local collection basic editor" })).toHaveCount(0);
+});
+
+test("clean mounted source update loads new values; keyboard and dirty-to-clean release guard", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(`${fixtureOrigin}/admin/collection-basic-refresh-fixture`);
+  const controls = page.getByRole("group", { name: "Fixture collection source updates" });
+  const editor = page.getByRole("region", { name: "Local collection basic editor" });
+  await controls.getByRole("button", { name: "Update source" }).click();
+  await editor.getByRole("button", { name: "Edit local draft" }).focus();
+  await expect(editor.getByRole("button", { name: "Edit local draft" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  const name = editor.getByLabel("English name");
+  await expect(name).toHaveValue("Server changed collection");
+  await name.focus();
+  await expect(name).toBeFocused();
+  await name.fill("Other local value");
+  await expect(editor.getByText("Unsaved local changes")).toBeVisible();
+  await name.fill("Server changed collection");
+  await expect(editor.getByText("No local changes")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  })).toBe(false);
+});

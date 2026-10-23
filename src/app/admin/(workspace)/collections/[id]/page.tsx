@@ -1,7 +1,8 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { AdminBadge, AdminPageHeader } from "@/components/admin/ui";
 import { CollectionDetailPanel } from "@/components/admin/collection-detail-panel";
+import { CollectionBasicEditor } from "@/components/admin/collection-basic-editor";
+import { GuardedAdminLink } from "@/components/admin/admin-unsaved-changes";
 import { requireAdminPage } from "@/lib/admin/server-access";
 import { parseCollectionMemberQuery } from "@/lib/admin/collection-detail-query";
 import { CatalogReadError } from "@/lib/catalog-read/errors";
@@ -38,10 +39,11 @@ export default async function AdminCollectionDetailPage({ params, searchParams }
     }
   }
   return <><AdminPageHeader eyebrow="CATALOG / COLLECTIONS / DETAIL" title="Collection detail"
-    description="Read-only collection information and associated products. Editing is unavailable.">
-    <AdminBadge>{detail.state === "COMPLETE" ? "Read only" : detail.state === "NOT_CONNECTED" ? "Not Connected" : detail.state}</AdminBadge>
+    description="Read-only collection information and associated products, with a browser-only basic information draft. Nothing is saved to the server.">
+    <AdminBadge>{detail.state === "COMPLETE" ? "LOCAL DEMO / NOT CONNECTED" : detail.state === "NOT_CONNECTED" ? "Not Connected" : detail.state}</AdminBadge>
   </AdminPageHeader>
-    <p className="mb-5"><Link href="/admin/collections" className="admin-inline-link">← Back to Collections</Link></p>
+    <p className="mb-5"><GuardedAdminLink href="/admin/collections" className="admin-inline-link">← Back to Collections</GuardedAdminLink></p>
     <CollectionDetailPanel detail={detail} members={members} invalidMemberCursor={invalidMemberCursor} />
+    <CollectionBasicEditor detail={detail} />
   </>;
 }

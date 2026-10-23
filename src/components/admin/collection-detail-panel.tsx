@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { AdminBadge, AdminCard, AdminTable } from "./ui";
+import { GuardedAdminLink } from "./admin-unsaved-changes";
 import { collectionMemberHref } from "@/lib/admin/collection-detail-query";
 import type { AdminCollectionDetailResult, AdminCollectionMemberListResult } from "@/lib/catalog-read/types";
 
@@ -72,12 +72,12 @@ export function CollectionDetailPanel({ detail, members, invalidMemberCursor = f
       </AdminTable> : <div className="admin-collection-state"
         role={memberState === "ERROR" || memberState === "INCOMPLETE" || memberState === "INVALID_CURSOR" ? "alert" : "status"}>
         <h3>{memberStates[memberState][0]}</h3><p>{memberStates[memberState][1]}</p>
-        {memberState === "INVALID_CURSOR" && <Link href={`/admin/collections/${item.id}`}>First member page</Link>}
+        {memberState === "INVALID_CURSOR" && <GuardedAdminLink href={`/admin/collections/${item.id}`}>First member page</GuardedAdminLink>}
       </div>}
       <nav className="admin-product-pagination" aria-label="Collection member pages">
-        {previous ? <Link href={collectionMemberHref(item.id, previous, "before")}>Previous</Link>
+        {previous ? <GuardedAdminLink href={collectionMemberHref(item.id, previous, "before")}>Previous</GuardedAdminLink>
           : <span aria-disabled="true">Previous</span>}
-        {next ? <Link href={collectionMemberHref(item.id, next)}>Next</Link>
+        {next ? <GuardedAdminLink href={collectionMemberHref(item.id, next)}>Next</GuardedAdminLink>
           : <span aria-disabled="true">Next</span>}
       </nav>
     </section>

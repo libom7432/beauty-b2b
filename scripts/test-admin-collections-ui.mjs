@@ -28,6 +28,7 @@ const { CollectionListPanel } = loadComponent("src/components/admin/collection-l
 });
 const { CollectionDetailPanel } = loadComponent("src/components/admin/collection-detail-panel.tsx", {
   "./ui": ui, "@/lib/admin/collection-detail-query": { collectionMemberHref },
+  "./admin-unsaved-changes": { GuardedAdminLink: ({ href, children }) => createElement("a", { href }, children) },
 });
 const { default: Loading } = loadComponent("src/app/admin/(workspace)/collections/loading.tsx", {
   "@/components/admin/ui": ui,

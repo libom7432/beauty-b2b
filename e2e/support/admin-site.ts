@@ -221,6 +221,9 @@ export async function startAdminFixture() {
     const categoryRefreshRoute = join(fixtureRoot, "src/app/admin/(workspace)/category-refresh-fixture");
     mkdirSync(categoryRefreshRoute, { recursive: true });
     cpSync(join(repositoryRoot, "e2e/support/category-refresh-page.tsx"), join(categoryRefreshRoute, "page.tsx"));
+    const collectionRefreshRoute = join(fixtureRoot, "src/app/admin/(workspace)/collection-basic-refresh-fixture");
+    mkdirSync(collectionRefreshRoute, { recursive: true });
+    cpSync(join(repositoryRoot, "e2e/support/collection-basic-refresh-page.tsx"), join(collectionRefreshRoute, "page.tsx"));
     const panelPath = join(fixtureRoot, "src/components/admin/product-list-panel.tsx");
     const panelSource = readFileSync(panelPath, "utf8");
     if (!panelSource.includes("testData = false")) throw Error("Admin products fixture no longer matches the list panel");

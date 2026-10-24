@@ -37,6 +37,9 @@ test("list link opens a read-only detail and fixed return link preserves safe fi
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`/admin/collections/${id(1)}$`));
   await expect(page.locator(".admin-topbar-title")).toHaveText("Collection detail");
+  const description = page.locator(".admin-page-description");
+  await expect(description).toContainText("LOCAL DEMO drafts for basic information and associated products");
+  await expect(description).toContainText("lost on refresh or departure");
   const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
   await expect(breadcrumb.getByRole("link", { name: "Collections" })).toHaveAttribute("href", "/admin/collections");
   await expect(breadcrumb.locator('[aria-current="page"]')).toHaveText("Detail");
@@ -61,14 +64,14 @@ test("filtered list, detail, browser history and refresh keep their own URL stat
   await expect(list.getByText("Collection 2", { exact: true })).toBeVisible();
   await list.getByRole("link", { name: "Open full details for Collection 2", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/collections/${id(2)}$`));
-  await expect(page.getByText("Draft Product", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Associated products" }).getByText("Draft Product", { exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/admin\/collections\?status=published$/);
   await expect(list.getByText("Collection 2", { exact: true })).toBeVisible();
   await page.goForward();
   await expect(page).toHaveURL(new RegExp(`/admin/collections/${id(2)}$`));
   await page.reload();
-  await expect(page.getByText("Draft Product", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Associated products" }).getByText("Draft Product", { exact: true })).toBeVisible();
   const breadcrumbLink = page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Collections" });
   await breadcrumbLink.focus();
   await expect(breadcrumbLink).toBeFocused();
@@ -80,7 +83,7 @@ test("published and retired details show their real status; empty member page is
   await fixtureCookies(context, "collections");
   await page.goto(detailUrl(2));
   await expect(page.getByRole("region", { name: "Collection detail information" }).getByText("published", { exact: true })).toBeVisible();
-  await expect(page.getByText("Draft Product", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Associated products" }).getByText("Draft Product", { exact: true })).toBeVisible();
   await page.goto(detailUrl(3));
   await expect(page.getByText("retired", { exact: true })).toBeVisible();
   await expect(page.getByText("No associated products on this page.")).toBeVisible();
@@ -157,7 +160,7 @@ test("long names, slug and product code wrap on a mobile viewport", async ({ pag
   await page.goto(detailUrl(1));
   await expect(page.locator(".admin-topbar-title")).toHaveText("Collection detail");
   await expect(page.getByText(/long-a{100}/)).toBeVisible();
-  await expect(page.getByText(/CODE-X{100}/)).toBeVisible();
+  await expect(page.getByRole("region", { name: "Associated products" }).getByText(/CODE-X{100}/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const table = page.locator(".admin-table-scroll");
   expect(await table.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
@@ -235,6 +238,130 @@ test("dirty draft guards list and member navigation; refresh restores source", a
   const refreshed = page.getByRole("region", { name: "Local collection basic editor" });
   await refreshed.getByRole("button", { name: "Edit local draft" }).click();
   await expect(refreshed.getByLabel("English name")).toHaveValue("Collection 1");
+});
+
+test("basic draft remains mounted across successful member pagination", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(detailUrl(1));
+  const editor = page.getByRole("region", { name: "Local collection basic editor" });
+  await editor.getByRole("button", { name: "Edit local draft" }).click();
+  await editor.getByLabel("English name").fill("Across pages");
+  page.once("dialog", async (dialog) => { await dialog.accept(); });
+  await page.getByRole("navigation", { name: "Collection member pages" }).getByRole("link", { name: "Next" }).click();
+  await expect(page).toHaveURL(/cursor=/);
+  await expect(editor.getByLabel("English name")).toHaveValue("Across pages");
+});
+
+test("membership draft survives member pages and both drafts keep the leave guard", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (!["GET", "HEAD"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`);
+  });
+  await page.goto(detailUrl(1));
+  const memberEditor = page.getByRole("region", { name: "Local collection membership editor" });
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await expect(memberEditor).toContainText("LOCAL DEMO / NOT CONNECTED");
+  await expect(memberEditor).toContainText("TEST DATA");
+  await expect(memberEditor.locator("[data-product-id]")).toHaveCount(25);
+  const first = memberEditor.locator(`[data-product-id="${id(101)}"]`);
+  const remove = first.getByRole("button", { name: "Remove locally" });
+  await remove.focus();
+  await expect(remove).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(memberEditor.getByText("Unsaved membership changes")).toBeVisible();
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Unsaved basic");
+  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.accept(); });
+  await page.getByRole("navigation", { name: "Collection member pages" }).getByRole("link", { name: "Next" }).click();
+  await expect(memberEditor.locator("[data-product-id]")).toHaveCount(50);
+  await expect(first.getByRole("button", { name: "Restore locally" })).toBeVisible();
+  await expect(basic.getByLabel("English name")).toHaveValue("Unsaved basic");
+  page.once("dialog", async (dialog) => { await dialog.accept(); });
+  await page.getByRole("navigation", { name: "Collection member pages" }).getByRole("link", { name: "Previous" }).click();
+  await expect(first.getByRole("button", { name: "Restore locally" })).toBeVisible();
+  await basic.getByRole("button", { name: "Discard changes" }).click();
+  await expect(memberEditor.getByText("Unsaved membership changes")).toBeVisible();
+  await first.getByRole("button", { name: "Restore locally" }).click();
+  await first.getByLabel("Local sort order for FAMILY-101").fill("2147483648");
+  await memberEditor.getByRole("button", { name: "Check membership draft" }).click();
+  await expect(memberEditor.getByText("Local fields: INVALID")).toBeVisible();
+  await first.getByLabel("Local sort order for FAMILY-101").fill("-2147483648");
+  await memberEditor.getByRole("button", { name: "Check membership draft" }).click();
+  await expect(memberEditor.getByText("Local fields: VALID")).toBeVisible();
+  await expect(memberEditor.getByText("Full membership and write checks: NOT_VERIFIED")).toBeVisible();
+  await memberEditor.getByRole("button", { name: "Discard membership changes" }).click();
+  await expect(memberEditor.getByText("No membership changes")).toBeVisible();
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Basic only");
+  await memberEditor.getByRole("button", { name: "Discard membership changes" }).click();
+  expect(await page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event); return event.defaultPrevented;
+  })).toBe(true);
+  page.once("dialog", async (dialog) => { await dialog.dismiss(); });
+  await page.getByRole("link", { name: "Back to Collections" }).click();
+  await expect(basic.getByLabel("English name")).toHaveValue("Basic only");
+  await basic.getByRole("button", { name: "Discard changes" }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event); return event.defaultPrevented;
+  })).toBe(false);
+  expect(writes).toEqual([]);
+  await page.reload();
+  await expect(memberEditor.getByText("No membership changes")).toBeVisible();
+  await expect(memberEditor.locator("[data-product-id]")).toHaveCount(25);
+  await page.goto(detailUrl(2));
+  await expect(memberEditor.locator(`[data-product-id="${id(101)}"]`)).toHaveCount(0);
+});
+
+test("mounted member source conflict preserves dirty draft and pauses checking", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(`${fixtureOrigin}/admin/collection-membership-refresh-fixture`);
+  const controls = page.getByRole("group", { name: "Fixture member source updates" });
+  const editor = page.getByRole("region", { name: "Local collection membership editor" });
+  const row = editor.locator('[data-product-id="550e8400-e29b-41d4-a716-446655440001"]');
+  await row.getByRole("button", { name: "Remove locally" }).click();
+  await controls.getByRole("button", { name: "Same values, new object" }).click();
+  await expect(editor.getByText(/Loaded member source data changed/i)).toHaveCount(0);
+  await controls.getByRole("button", { name: "Update source" }).click();
+  await expect(row.getByRole("button", { name: "Restore locally" })).toBeVisible();
+  await expect(editor.getByText(/Loaded member source data changed/i)).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Check membership draft" })).toBeDisabled();
+  await editor.getByRole("button", { name: "Discard membership changes" }).click();
+  await expect(editor.getByText("No membership changes")).toBeVisible();
+  await expect(row.getByText("Source sort order: 2")).toBeVisible();
+  await row.getByRole("button", { name: "Remove locally" }).click();
+  for (const [button, state] of [["Incomplete source", "INCOMPLETE"], ["Error source", "ERROR"],
+    ["Disconnect source", "NOT_CONNECTED"], ["Empty page", "EMPTY_PAGE"]] as const) {
+    await controls.getByRole("button", { name: button }).click();
+    await expect(editor.getByText(`Current member page: ${state}. No new member facts were accepted; checking is paused.`)).toBeVisible();
+    await expect(row.getByRole("button", { name: "Restore locally" })).toBeDisabled();
+    await expect(editor.getByText("Unsaved membership changes")).toBeVisible();
+  }
+  await controls.getByRole("button", { name: "Reconnect" }).click();
+  await expect(row.getByRole("button", { name: "Restore locally" })).toBeEnabled();
+  await editor.getByRole("button", { name: "Discard membership changes" }).click();
+  await expect(editor.getByText("No membership changes")).toBeVisible();
+});
+
+test("duplicate source anomaly survives Discard and unrelated clean reads", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(`${fixtureOrigin}/admin/collection-membership-refresh-fixture`);
+  const controls = page.getByRole("group", { name: "Fixture member source updates" });
+  const editor = page.getByRole("region", { name: "Local collection membership editor" });
+  await controls.getByRole("button", { name: "Duplicate source IDs" }).click();
+  await expect(editor.getByText(/source page had duplicate or invalid member identities/i)).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Check membership draft" })).toBeDisabled();
+  await editor.getByRole("button", { name: "Remove locally" }).click();
+  await editor.getByRole("button", { name: "Discard membership changes" }).click();
+  await expect(editor.getByText("No membership changes")).toBeVisible();
+  await expect(editor.getByText(/source page had duplicate or invalid member identities/i)).toBeVisible();
+  await expect(editor.getByRole("button", { name: "Check membership draft" })).toBeDisabled();
+  await controls.getByRole("button", { name: "Same values, new object" }).click();
+  await expect(editor.getByRole("button", { name: "Check membership draft" })).toBeDisabled();
+  await page.reload();
+  await expect(editor.getByRole("button", { name: "Check membership draft" })).toBeEnabled();
 });
 
 test("mounted source replacement preserves dirty draft and blocks checking until discard", async ({ page, context }) => {

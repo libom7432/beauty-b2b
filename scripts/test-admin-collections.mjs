@@ -370,6 +370,15 @@ test("members are bounded, paged and unpublished products remain visible to Admi
   await blocked(reader.listAdminCollectionMembers(id(1), { limit: 51 }), "INVALID_INPUT");
 });
 
+test("Repository rejects same-page duplicate member UUID before a COMPLETE result", async () => {
+  for (const second of [member(10), { ...member(10), sort_order: 20 }]) {
+    const { source } = fixtureSource([collection(1)], [member(10), second]);
+    const result = await repo(source).listAdminCollectionMembers(id(1));
+    assert.equal(result.state, "INCOMPLETE");
+    assert.ok(result.issues.some((entry) => entry.code === "DUPLICATE_ID"));
+  }
+});
+
 test("member empty page recovers the boundary product and missing evidence cannot prove absence", async () => {
   const { source } = fixtureSource([collection(1)], [member(10), member(11)]);
   const reader = repo(source);

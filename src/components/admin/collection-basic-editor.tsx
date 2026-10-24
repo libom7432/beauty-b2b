@@ -5,15 +5,15 @@ import type { AdminCollectionDetailResult } from "@/lib/catalog-read/types";
 import { canEditCollectionSlug, collectionBasicFingerprint, collectionBasicSourceChanged,
   createCollectionBasicSelection, validateCollectionBasicDraft,
   type CollectionBasicDraft, type CollectionBasicSelection } from "@/lib/admin/collection-basic-editor-draft";
-import { useAdminUnsavedChanges } from "./admin-unsaved-changes";
 
-export function CollectionBasicEditor({ detail }: { detail: AdminCollectionDetailResult }) {
+export function CollectionBasicEditor({ detail, onDirtyChange }: {
+  detail: AdminCollectionDetailResult; onDirtyChange: (dirty: boolean) => void;
+}) {
   const current = detail.state === "COMPLETE" ? detail.item : null;
   const [stored, setStored] = useState<CollectionBasicSelection | null>(() => current
     ? createCollectionBasicSelection(current) : null);
   const [editing, setEditing] = useState(false);
   const [checked, setChecked] = useState(false);
-  const { setDirty } = useAdminUnsavedChanges();
   const storedDirty = !!stored && collectionBasicFingerprint(stored.draft) !==
     collectionBasicFingerprint(stored.originalDraft);
   // A clean draft follows a newly supplied trusted snapshot. A dirty draft keeps its own base.
@@ -22,8 +22,8 @@ export function CollectionBasicEditor({ detail }: { detail: AdminCollectionDetai
   const dirty = !!selection && collectionBasicFingerprint(selection.draft) !==
     collectionBasicFingerprint(selection.originalDraft);
   const sourceChanged = !!selection && collectionBasicSourceChanged(selection.original, current);
-  useEffect(() => { setDirty(dirty); }, [dirty, setDirty]);
-  useEffect(() => () => setDirty(false), [setDirty]);
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   if (!selection || !current && !dirty) return null;
   const { original, draft } = selection;

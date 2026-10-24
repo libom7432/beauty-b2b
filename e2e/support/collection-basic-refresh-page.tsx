@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CollectionBasicEditor } from "@/components/admin/collection-basic-editor";
+import { useAdminUnsavedChanges } from "@/components/admin/admin-unsaved-changes";
 import type { AdminCollectionDetail, AdminCollectionDetailResult } from "@/lib/catalog-read/types";
 
 // Copied into the isolated Playwright app only; never registered as a production route.
@@ -14,10 +15,11 @@ const complete = (value: AdminCollectionDetail): AdminCollectionDetailResult => 
 
 export default function CollectionBasicRefreshFixturePage() {
   const [detail, setDetail] = useState<AdminCollectionDetailResult>(() => complete(item));
+  const { setDirty } = useAdminUnsavedChanges();
   return <><div role="group" aria-label="Fixture collection source updates">
     <button type="button" onClick={() => setDetail(complete({ ...item }))}>Same values, new object</button>
     <button type="button" onClick={() => setDetail(complete({ ...item, nameEn: "Server changed collection" }))}>Update source</button>
     <button type="button" onClick={() => setDetail({ state: "NOT_CONNECTED", item: null,
       origin: "NONE", issues: [] })}>Disconnect source</button>
-  </div><CollectionBasicEditor detail={detail} /></>;
+  </div><CollectionBasicEditor detail={detail} onDirtyChange={setDirty} /></>;
 }

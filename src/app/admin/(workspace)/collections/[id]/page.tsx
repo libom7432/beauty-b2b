@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { AdminBadge, AdminPageHeader } from "@/components/admin/ui";
 import { CollectionDetailPanel } from "@/components/admin/collection-detail-panel";
-import { CollectionBasicEditor } from "@/components/admin/collection-basic-editor";
+import { CollectionEditors } from "@/components/admin/collection-editors";
 import { GuardedAdminLink } from "@/components/admin/admin-unsaved-changes";
 import { requireAdminPage } from "@/lib/admin/server-access";
 import { parseCollectionMemberQuery } from "@/lib/admin/collection-detail-query";
@@ -27,9 +27,11 @@ export default async function AdminCollectionDetailPage({ params, searchParams }
   }
   let members: AdminCollectionMemberListResult | null = null;
   let invalidMemberCursor = false;
+  let pageKey = "first";
   if (detail.state === "COMPLETE") {
     try {
       const query = parseCollectionMemberQuery(await searchParams);
+      pageKey = query.cursor ? `${query.direction}:${query.cursor}` : "first";
       members = await repository.listAdminCollectionMembers(id, query);
     } catch (error) {
       if (error instanceof CatalogReadError && error.code === "FORBIDDEN") redirect("/admin/login?error=1");
@@ -39,11 +41,12 @@ export default async function AdminCollectionDetailPage({ params, searchParams }
     }
   }
   return <><AdminPageHeader eyebrow="CATALOG / COLLECTIONS / DETAIL" title="Collection detail"
-    description="Read-only collection information and associated products, with a browser-only basic information draft. Nothing is saved to the server.">
+    description="Read-only collection details with LOCAL DEMO drafts for basic information and associated products. Changes stay in browser memory, are never saved to the database, and are lost on refresh or departure.">
     <AdminBadge>{detail.state === "COMPLETE" ? "LOCAL DEMO / NOT CONNECTED" : detail.state === "NOT_CONNECTED" ? "Not Connected" : detail.state}</AdminBadge>
   </AdminPageHeader>
     <p className="mb-5"><GuardedAdminLink href="/admin/collections" className="admin-inline-link">← Back to Collections</GuardedAdminLink></p>
     <CollectionDetailPanel detail={detail} members={members} invalidMemberCursor={invalidMemberCursor} />
-    <CollectionBasicEditor detail={detail} />
+    <CollectionEditors key={id.toLowerCase()} collectionId={id} detail={detail}
+      members={members} pageKey={pageKey} />
   </>;
 }

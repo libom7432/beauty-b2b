@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { parseAdminCollectionsUrl, adminCollectionsHref } from "../src/lib/admin/collections-query.ts";
 import { parseCollectionMemberQuery, collectionMemberHref } from "../src/lib/admin/collection-detail-query.ts";
+import { candidateHref, candidateQueryParams } from "../src/lib/admin/collection-candidate-search.ts";
 
 const require = createRequire(import.meta.url);
 const root = new URL("../", import.meta.url);
@@ -28,6 +29,7 @@ const { CollectionListPanel } = loadComponent("src/components/admin/collection-l
 });
 const { CollectionDetailPanel } = loadComponent("src/components/admin/collection-detail-panel.tsx", {
   "./ui": ui, "@/lib/admin/collection-detail-query": { collectionMemberHref },
+  "@/lib/admin/collection-candidate-search": { candidateHref, candidateQueryParams },
   "./admin-unsaved-changes": { GuardedAdminLink: ({ href, children }) => createElement("a", { href }, children) },
 });
 const { default: Loading } = loadComponent("src/app/admin/(workspace)/collections/loading.tsx", {
@@ -48,9 +50,10 @@ const member = { productId: "00000002-0000-4000-8000-000000000000", productCode:
   nameEn: "Draft product", nameZh: "草稿商品", productStatus: "draft", sortOrder: 4 };
 const memberResult = (state, overrides = {}) => ({ state, items: [], issues: [], nextCursor: null,
   previousCursor: null, origin: "OFFLINE_FIXTURE", ...overrides });
-const renderDetail = (value = detail, members = memberResult("COMPLETE"), invalidMemberCursor = false) =>
+const renderDetail = (value = detail, members = memberResult("COMPLETE"), invalidMemberCursor = false,
+  urlPaused = false) =>
   renderToStaticMarkup(createElement(CollectionDetailPanel,
-    { detail: value, members, invalidMemberCursor }));
+    { detail: value, members, invalidMemberCursor, urlPaused }));
 
 test("URL parsing rejects ambiguous, malformed or unbounded queries", () => {
   for (const input of [{ status: ["draft", "published"] }, { status: "other" },
@@ -130,6 +133,16 @@ test("collection and member states stay distinct and member failure keeps collec
   }
   assert.match(renderDetail(detail, memberResult("COMPLETE")), /No associated products on this page/);
   assert.match(renderDetail(detail, null, true), /Invalid member cursor/);
+});
+
+test("unsupported URL pauses the member panel without claiming a source completeness failure", () => {
+  const html = renderDetail(detail, memberResult("INCOMPLETE"), false, true);
+  assert.match(html, /URL_PAUSED/);
+  assert.match(html, /Member read paused by URL parameters/);
+  assert.doesNotMatch(html, /Member data incomplete|The source could not prove/);
+  assert.doesNotMatch(html, /No associated products on this page/);
+  assert.match(renderDetail(detail, null, true, true), /Invalid member cursor/);
+  assert.doesNotMatch(renderDetail(detail, null, true, true), /URL_PAUSED/);
 });
 
 test("member pagination uses supplied signed cursors and empty page recovery", () => {

@@ -1,6 +1,8 @@
 import { AdminBadge, AdminCard, AdminTable } from "./ui";
 import { GuardedAdminLink } from "./admin-unsaved-changes";
 import { collectionMemberHref } from "@/lib/admin/collection-detail-query";
+import { candidateQueryParams, type CandidateQuery } from "@/lib/admin/collection-candidate-search";
+import type { UrlEntry } from "@/lib/admin/collection-detail-query";
 import type { AdminCollectionDetailResult, AdminCollectionMemberListResult } from "@/lib/catalog-read/types";
 
 const shown = (value: string | null | undefined) => value?.trim() || "Not provided";
@@ -15,6 +17,7 @@ const detailStates = {
 } as const;
 
 const memberStates = {
+  URL_PAUSED: ["Member read paused by URL parameters", "Remove unsupported URL parameters before reading associated products."],
   INVALID_CURSOR: ["Invalid member cursor", "The member cursor is invalid. Return to the first member page."],
   NOT_CONNECTED: ["Members database not connected", "The read-only member source is not connected."],
   NOT_FOUND: ["Member collection unavailable", "The member source no longer finds this collection. Refresh the detail."],
@@ -23,10 +26,16 @@ const memberStates = {
   EMPTY_PAGE: ["No members beyond this cursor", "This page is empty. Use the recovery link to return."],
 } as const;
 
-export function CollectionDetailPanel({ detail, members, invalidMemberCursor = false }: {
+export function CollectionDetailPanel({ detail, members, invalidMemberCursor = false,
+  urlPaused = false,
+  candidateQuery = { search: "", status: "all", cursor: null, direction: "after" },
+  candidateUrlEntries }: {
   detail: AdminCollectionDetailResult;
   members: AdminCollectionMemberListResult | null;
   invalidMemberCursor?: boolean;
+  urlPaused?: boolean;
+  candidateQuery?: CandidateQuery;
+  candidateUrlEntries?: readonly UrlEntry[];
 }) {
   if (detail.state !== "COMPLETE" || !detail.item) {
     const [title, description] = detailStates[detail.state === "COMPLETE" ? "ERROR" : detail.state];
@@ -34,10 +43,11 @@ export function CollectionDetailPanel({ detail, members, invalidMemberCursor = f
       <h2>{title}</h2><p>{description}</p></div>;
   }
   const item = detail.item;
-  const memberState = invalidMemberCursor ? "INVALID_CURSOR" : members?.state ?? "ERROR";
+  const memberState = invalidMemberCursor ? "INVALID_CURSOR" : urlPaused ? "URL_PAUSED" : members?.state ?? "ERROR";
   const rows = memberState === "COMPLETE" ? members?.items ?? [] : [];
   const previous = (memberState === "COMPLETE" || memberState === "EMPTY_PAGE") ? members?.previousCursor : null;
   const next = (memberState === "COMPLETE" || memberState === "EMPTY_PAGE") ? members?.nextCursor : null;
+  const candidateParams = candidateUrlEntries ?? Object.entries(candidateQueryParams(candidateQuery));
   return <section className="admin-detail-grid" aria-label="Collection detail information">
     {detail.origin === "OFFLINE_FIXTURE" && <div className="admin-detail-wide"><AdminBadge tone="warning">TEST DATA</AdminBadge></div>}
     <AdminCard title="Collection information"><dl className="admin-detail-list">
@@ -70,14 +80,14 @@ export function CollectionDetailPanel({ detail, members, invalidMemberCursor = f
         </tr>)}
         {rows.length === 0 && <tr><td colSpan={5}>No associated products on this page.</td></tr>}
       </AdminTable> : <div className="admin-collection-state"
-        role={memberState === "ERROR" || memberState === "INCOMPLETE" || memberState === "INVALID_CURSOR" ? "alert" : "status"}>
+        role={memberState === "ERROR" || memberState === "INCOMPLETE" || memberState === "INVALID_CURSOR" || memberState === "URL_PAUSED" ? "alert" : "status"}>
         <h3>{memberStates[memberState][0]}</h3><p>{memberStates[memberState][1]}</p>
-        {memberState === "INVALID_CURSOR" && <GuardedAdminLink href={`/admin/collections/${item.id}`}>First member page</GuardedAdminLink>}
+        {memberState === "INVALID_CURSOR" && <GuardedAdminLink href={collectionMemberHref(item.id, null, "after", candidateParams)}>First member page</GuardedAdminLink>}
       </div>}
       <nav className="admin-product-pagination" aria-label="Collection member pages">
-        {previous ? <GuardedAdminLink href={collectionMemberHref(item.id, previous, "before")}>Previous</GuardedAdminLink>
+        {previous ? <GuardedAdminLink href={collectionMemberHref(item.id, previous, "before", candidateParams)}>Previous</GuardedAdminLink>
           : <span aria-disabled="true">Previous</span>}
-        {next ? <GuardedAdminLink href={collectionMemberHref(item.id, next)}>Next</GuardedAdminLink>
+        {next ? <GuardedAdminLink href={collectionMemberHref(item.id, next, "after", candidateParams)}>Next</GuardedAdminLink>
           : <span aria-disabled="true">Next</span>}
       </nav>
     </section>

@@ -1,7 +1,8 @@
 // Copied only into the temporary Playwright project, never imported by production code.
 import type { CatalogReadSource, AdminCollectionSourceRow, CollectionSourceQuery,
-  CollectionSourcePage, AdminCollectionMemberSourceRow } from "@/lib/catalog-read/types";
-import { notConfiguredCatalogSource } from "@/lib/catalog-read/offline";
+  CollectionSourcePage, AdminCollectionMemberSourceRow, PrivateCatalogBundle } from "@/lib/catalog-read/types";
+import { createOfflineCatalogSource, notConfiguredCatalogSource } from "@/lib/catalog-read/offline";
+import { CatalogReadError } from "@/lib/catalog-read/errors";
 
 const id = (n: number) => `${String(n).padStart(8, "0")}-0000-4000-8000-000000000000`;
 const updated = "2026-10-01T00:00:00.000Z";
@@ -26,10 +27,39 @@ const memberRows: AdminCollectionMemberSourceRow[] = Array.from({ length: 61 }, 
 memberRows.push({ collection_id: id(2), product_id: id(202), sort_order: 0,
   product_code: "FAMILY-202", name_en: "Draft Product", name_zh: "草稿商品", product_status: "draft" });
 
+const productRows: PrivateCatalogBundle[] = Array.from({ length: 61 }, (_, index) => {
+  const number = index + 101;
+  const productId = id(number);
+  const status = index % 3 === 0 ? "draft" as const :
+    index % 3 === 1 ? "published" as const : "retired" as const;
+  return { product: { id: productId, product_code: `FAMILY-${number}`,
+    slug: `fixture-family-${number}`, product_type: "press-on", status,
+    attributes: {}, customization_options: [], oem: false, odm: false,
+    lead_time_min_days: null, lead_time_max_days: null, seo_indexable: false,
+    featured: false, new_arrival: false, published_at: status === "published" ? updated : null,
+    created_at: created, updated_at: updated },
+    translations: [{ product_id: productId, locale: "en" as const, name: `Candidate ${number}`,
+      short_description: "", description: "", seo_title: "", seo_description: "",
+      created_at: created, updated_at: updated },
+      { product_id: productId, locale: "zh" as const, name: `候选商品 ${number}`,
+        short_description: "", description: "", seo_title: "", seo_description: "",
+        created_at: created, updated_at: updated }],
+    variants: [], categoryLinks: [], categories: [], images: [] };
+});
+const productSource = createOfflineCatalogSource(productRows);
+
 export function createCollectionsFixtureSource(state: string): CatalogReadSource {
   const sourceRows = state === "collections-empty" ? [] : rows;
   return { ...notConfiguredCatalogSource,
     mode: "offline",
+    async listAdmin(query) {
+      if (state === "collections-candidates-not-connected") throw new CatalogReadError("NOT_CONFIGURED");
+      if (state === "collections-candidates-error") throw Error("private://candidate-source-secret");
+      const page = await productSource.listAdmin(query);
+      if (state === "collections-candidates-incomplete" && page.rows.length)
+        return { ...page, rows: [page.rows[0], page.rows[0]] };
+      return page;
+    },
     async listAdminCollections(query: CollectionSourceQuery): Promise<CollectionSourcePage<AdminCollectionSourceRow>> {
       if (state === "collections-error") throw Error("private://collections-secret");
       const eligible = sourceRows.filter((row) => !query.status || row.status === query.status);

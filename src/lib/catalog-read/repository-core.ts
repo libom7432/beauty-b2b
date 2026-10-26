@@ -10,7 +10,8 @@ import type { CollectionCursorCodec } from "./collections-cursor.ts";
 import type { AdminCategoryOptions, AdminCategoryReadResult, AdminProductDetailDTO, AdminProductListDTO, PrivateCatalogBundle, PublicCatalogBundle,
   CatalogListQuery, CatalogPage, CatalogReadSource, CatalogScope, CatalogSort, PublicProductDTO,
   SourcePage, SourceQuery, AdminCollectionListQuery, AdminCollectionListResult,
-  AdminCollectionDetailResult, AdminCollectionMemberQuery, AdminCollectionMemberListResult } from "./types.ts";
+  AdminCollectionDetailResult, AdminCollectionMemberQuery, AdminCollectionMemberListResult,
+  AdminCollectionMembershipCheckResult } from "./types.ts";
 
 export const MAX_PAGE_SIZE = 50;
 const DEFAULT_PAGE_SIZE = 20;
@@ -110,6 +111,8 @@ export interface CatalogReadRepository {
   getAdminCollectionById(id: string): Promise<AdminCollectionDetailResult>;
   listAdminCollectionMembers(id: string, query?: AdminCollectionMemberQuery):
     Promise<AdminCollectionMemberListResult>;
+  checkAdminCollectionMembership(collectionId: string, productId: string):
+    Promise<AdminCollectionMembershipCheckResult>;
 }
 /** Pure core for offline tests. Production wiring must stay in a server-only module. */
 export function createCatalogReadRepository(source: CatalogReadSource, admin: Readonly<{

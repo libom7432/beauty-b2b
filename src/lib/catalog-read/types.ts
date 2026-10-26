@@ -149,6 +149,20 @@ export type AdminCollectionDetailResult = Readonly<{ state: AdminCollectionReadS
 export type AdminCollectionMemberListResult = Readonly<{ state: AdminCollectionReadState;
   items: readonly AdminCollectionMember[]; issues: readonly AdminCollectionIssue[];
   nextCursor: string | null; previousCursor: string | null; origin: AdminCollectionOrigin }>;
+/** An exact pair observation, never a guarantee about a later database state. */
+export type AdminCollectionMembershipCheckResult = Readonly<{
+  collectionId: string; productId: string;
+  status: "MEMBER" | "NOT_MEMBER" | "NOT_CONNECTED" | "ERROR" | "INCOMPLETE";
+  origin: AdminCollectionOrigin;
+}>;
+/** A future adapter must derive all three existence facts for the exact pair in one
+ * bounded statement or one read-only REPEATABLE READ snapshot, using Admin-private
+ * tables rather than the Published-only public views. `complete` is an adapter
+ * obligation; offline Repository checks cannot prove that its SQL is correct. */
+export type CollectionMembershipSourceEvidence = Readonly<{
+  collectionId: string; productId: string; complete: boolean;
+  collectionExists: boolean; productExists: boolean; membershipExists: boolean;
+}>;
 export type AdminCollectionListQuery = Readonly<{ limit?: number; cursor?: string;
   status?: CatalogStatus; direction?: "after" | "before" }>;
 export type AdminCollectionMemberQuery = Readonly<{ limit?: number; cursor?: string;
@@ -195,6 +209,9 @@ export interface CatalogReadSource {
   listAdminCollections?(query: CollectionSourceQuery): Promise<CollectionSourcePage<AdminCollectionSourceRow>>;
   getAdminCollectionById?(id: string): Promise<CollectionSourceDetail>;
   listAdminCollectionMembers?(query: CollectionSourceQuery): Promise<CollectionMemberSourcePage>;
+  /** Optional exact-pair read. Missing implementation means NOT_CONNECTED. */
+  checkAdminCollectionMembership?(collectionId: string, productId: string):
+    Promise<CollectionMembershipSourceEvidence>;
 }
 export type CatalogPage<T> = Readonly<{ items: readonly T[]; nextCursor: string | null;
   previousCursor?: string | null }>;

@@ -5,7 +5,8 @@ import type { AdminCollectionDetail, AdminCollectionIssue, AdminCollectionListQu
   AdminCollectionMember, AdminCollectionMemberListResult, AdminCollectionMemberQuery,
   AdminCollectionOrigin, AdminCollectionSourceRow, AdminCollectionListResult,
   AdminCollectionSummary, AdminCollectionDetailResult, AdminCollectionMemberSourceRow,
-  CatalogReadSource, CollectionSourcePage, CollectionSourceQuery } from "./types.ts";
+  CatalogReadSource, CollectionSourcePage, CollectionSourceQuery,
+  AdminCollectionMembershipCheckResult } from "./types.ts";
 
 export const DEFAULT_COLLECTION_PAGE_SIZE = 25;
 export const MAX_COLLECTION_PAGE_SIZE = 50;
@@ -248,6 +249,39 @@ export function createAdminCollectionsReader(source: CatalogReadSource, authoriz
         nameZh: entry.nameZh, productStatus: entry.productStatus, sortOrder: entry.sortOrder,
       }));
       return { ...page, items, origin: originFor(source) };
+    },
+    async checkAdminCollectionMembership(collectionId: string, productId: string):
+      Promise<AdminCollectionMembershipCheckResult> {
+      await authorize();
+      if (typeof collectionId !== "string" || !COLLECTION_UUID.test(collectionId) ||
+        typeof productId !== "string" || !COLLECTION_UUID.test(productId)) return invalid();
+      const normalizedCollectionId = collectionId.toLowerCase();
+      const normalizedProductId = productId.toLowerCase();
+      const response = (status: AdminCollectionMembershipCheckResult["status"],
+        origin: AdminCollectionOrigin = "NONE"): AdminCollectionMembershipCheckResult => ({
+        collectionId: normalizedCollectionId, productId: normalizedProductId, status, origin,
+      });
+      if (source.mode === "not_configured" || !source.checkAdminCollectionMembership)
+        return response("NOT_CONNECTED");
+      let evidence;
+      try {
+        evidence = await source.checkAdminCollectionMembership(
+          normalizedCollectionId, normalizedProductId);
+      } catch { return response("ERROR"); }
+      try {
+        if (!evidence || typeof evidence !== "object" || Array.isArray(evidence))
+          return response("INCOMPLETE", originFor(source));
+        const { collectionId: echoedCollectionId, productId: echoedProductId, complete,
+          collectionExists, productExists, membershipExists } = evidence;
+        if (typeof echoedCollectionId !== "string" || !COLLECTION_UUID.test(echoedCollectionId) ||
+          echoedCollectionId.toLowerCase() !== normalizedCollectionId ||
+          typeof echoedProductId !== "string" || !COLLECTION_UUID.test(echoedProductId) ||
+          echoedProductId.toLowerCase() !== normalizedProductId || complete !== true ||
+          collectionExists !== true || productExists !== true ||
+          typeof membershipExists !== "boolean")
+          return response("INCOMPLETE", originFor(source));
+        return response(membershipExists === true ? "MEMBER" : "NOT_MEMBER", originFor(source));
+      } catch { return response("ERROR"); }
     },
   };
 }

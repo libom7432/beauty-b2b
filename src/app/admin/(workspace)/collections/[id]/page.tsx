@@ -2,7 +2,6 @@ import { notFound, redirect } from "next/navigation";
 import { AdminBadge, AdminPageHeader } from "@/components/admin/ui";
 import { CollectionDetailPanel } from "@/components/admin/collection-detail-panel";
 import { CollectionEditors } from "@/components/admin/collection-editors";
-import { CollectionCandidateSearch } from "@/components/admin/collection-candidate-search";
 import { GuardedAdminLink } from "@/components/admin/admin-unsaved-changes";
 import { requireAdminPage } from "@/lib/admin/server-access";
 import { classifyCollectionDetailParams, clearUnsupportedCollectionParamsHref,
@@ -89,15 +88,15 @@ export default async function AdminCollectionDetailPage({ params, searchParams }
       urlPaused={hasUnsupported}
       candidateQuery={candidateQuery} candidateUrlEntries={rawCandidateEntries} />
     <CollectionEditors key={id.toLowerCase()} collectionId={id} detail={detail}
-      members={members} pageKey={pageKey} />
-    {detail.state === "COMPLETE" && candidateResult && <CollectionCandidateSearch
-      collectionId={id} memberUrlEntries={rawMemberEntries} query={candidateQuery}
-      urlPaused={hasUnsupported}
-      hasCandidateCursor={rawQuery.candidate_cursor !== undefined && candidateResult.state !== "INVALID_QUERY"}
-      result={candidateResult}
-      testData={detail.origin === "OFFLINE_FIXTURE"}
-      nextHref={candidateResult.nextCursor ? candidateHrefFor(candidateResult.nextCursor) : null}
-      previousHref={candidateResult.previousCursor ? candidateHrefFor(candidateResult.previousCursor, "before") : null}
-      firstHref={candidateHrefFor(null)} />}
+      members={members} pageKey={pageKey}
+      candidate={detail.state === "COMPLETE" && candidateResult ? {
+        collectionId: id, memberUrlEntries: rawMemberEntries, query: candidateQuery,
+        urlPaused: hasUnsupported,
+        hasCandidateCursor: rawQuery.candidate_cursor !== undefined && candidateResult.state !== "INVALID_QUERY",
+        result: candidateResult, testData: detail.origin === "OFFLINE_FIXTURE",
+        nextHref: candidateResult.nextCursor ? candidateHrefFor(candidateResult.nextCursor) : null,
+        previousHref: candidateResult.previousCursor ? candidateHrefFor(candidateResult.previousCursor, "before") : null,
+        firstHref: candidateHrefFor(null),
+      } : null} />
   </>;
 }

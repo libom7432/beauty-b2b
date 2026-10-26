@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ComponentProps } from "react";
 import type { AdminCollectionDetailResult, AdminCollectionMemberListResult } from "@/lib/catalog-read/types";
 import { changeMembershipOrder, createMembershipDraft, discardMembershipDraft,
   ingestMembershipPage, markMembershipRemoved, membershipIsDirty,
   sortedMembershipEntries, validateMembershipDraft } from "@/lib/admin/collection-membership-draft";
 import { useAdminUnsavedChanges } from "./admin-unsaved-changes";
 import { CollectionBasicEditor } from "./collection-basic-editor";
+import { CollectionCandidateSearch } from "./collection-candidate-search";
 
-export function CollectionEditors({ collectionId, detail, members, pageKey }: {
+export function CollectionEditors({ collectionId, detail, members, pageKey, candidate }: {
   collectionId: string; detail: AdminCollectionDetailResult;
   members: AdminCollectionMemberListResult | null; pageKey: string;
+  candidate?: ComponentProps<typeof CollectionCandidateSearch> | null;
 }) {
   const { setDirty } = useAdminUnsavedChanges();
   const [basicDirty, setBasicDirty] = useState(false);
@@ -105,5 +107,6 @@ export function CollectionEditors({ collectionId, detail, members, pageKey }: {
             <li key={reason}>{reason}: NOT_VERIFIED</li>)}</ul>
         </div>}
       </section>}
+    {candidate && <CollectionCandidateSearch {...candidate} />}
   </>;
 }

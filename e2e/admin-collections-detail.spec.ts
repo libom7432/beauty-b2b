@@ -20,6 +20,8 @@ test("candidate search uses isolated read-only pages, mixed names and signed cur
   await expect(candidates).toContainText("cannot prove that a product is not already associated");
   await expect(candidates.locator("tbody tr")).toHaveCount(20);
   await expect(candidates.getByRole("button", { name: "Add Candidate" })).toHaveCount(0);
+  await expect(candidates.getByRole("button", { name: /Verify Membership|Add to Draft/i })).toHaveCount(0);
+  await expect(page.locator(".admin-membership-editor + .admin-candidate-panel")).toHaveCount(1);
   await candidates.getByRole("button", { name: "Next" }).click();
   await expect(page).toHaveURL(/candidate_cursor=/);
   await expect(candidates.locator("tbody tr")).toHaveCount(20);
@@ -684,6 +686,8 @@ test("membership draft survives member pages and both drafts keep the leave guar
   await expect(memberEditor.locator("[data-product-id]")).toHaveCount(25);
   await page.goto(detailUrl(2));
   await expect(memberEditor.locator(`[data-product-id="${id(101)}"]`)).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Candidate product search" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Local collection basic editor" }).getByText("No local changes")).toBeVisible();
 });
 
 test("mounted member source conflict preserves dirty draft and pauses checking", async ({ page, context }) => {

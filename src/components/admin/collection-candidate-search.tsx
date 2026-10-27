@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { CandidateQuery, CandidateResult } from "@/lib/admin/collection-candidate-search";
 import type { UrlEntry } from "@/lib/admin/collection-detail-query";
 import type { CandidateLocalMembershipStatus } from "@/lib/admin/collection-candidate-membership-status";
+import type { AdminCollectionMembershipCheckResult } from "@/lib/catalog-read/types";
 import { AdminBadge, AdminTable } from "./ui";
 
 const stateCopy: Record<CandidateResult["state"], string> = {
@@ -22,20 +23,34 @@ const membershipCopy: Record<CandidateLocalMembershipStatus, string> = {
   ALREADY_MEMBER: "Already in Collection", MEMBERSHIP_UNAVAILABLE: "Membership Status Unavailable",
   NOT_VERIFIED: "Membership Not Verified",
 };
+export type CandidateVerificationDisplay = Readonly<{
+  productId: string; phase: "VERIFYING" | "RESULT" | "FAILED" | "EXPIRED";
+  status?: AdminCollectionMembershipCheckResult["status"];
+}>;
+const verificationCopy: Record<AdminCollectionMembershipCheckResult["status"], string> = {
+  MEMBER: "Member (exact GET check)", NOT_MEMBER: "Not a Member — Verified for this view only",
+  NOT_CONNECTED: "Verification Not Connected", ERROR: "Verification Error",
+  INCOMPLETE: "Verification Incomplete",
+};
 
 export function CollectionCandidateSearch({ collectionId, memberUrlEntries, query, result, testData,
-  hasCandidateCursor, urlPaused = false, membershipStatuses,
+  hasCandidateCursor, urlPaused = false, membershipStatuses, verification, canVerify,
+  onVerify, onInvalidateVerification,
   nextHref, previousHref, firstHref }: {
   collectionId: string; memberUrlEntries: readonly UrlEntry[]; query: CandidateQuery;
   hasCandidateCursor: boolean;
   urlPaused?: boolean;
   result: CandidateResult; testData: boolean;
   membershipStatuses: Readonly<Record<string, CandidateLocalMembershipStatus>>;
+  verification: CandidateVerificationDisplay | null;
+  canVerify: boolean;
+  onVerify: (productId: string) => void;
+  onInvalidateVerification: () => void;
   nextHref: string | null; previousHref: string | null; firstHref: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const navigate = (href: string) => startTransition(() => router.push(href));
+  const navigate = (href: string) => { onInvalidateVerification(); startTransition(() => router.push(href)); };
   const hrefFor = (nextSearch: string, nextStatus: CandidateQuery["status"]) => {
     const params = new URLSearchParams();
     for (const [key, value] of memberUrlEntries) {
@@ -78,14 +93,25 @@ export function CollectionCandidateSearch({ collectionId, memberUrlEntries, quer
       {query.search && ` · Search: ${query.search}`}{query.status !== "all" && ` · Status: ${query.status}`}
     </p>
     {rows.length > 0 && <AdminTable caption="Candidate products on current query page"
-      headings={["Product UUID", "Product Code", "Display name", "Status", "Local membership"]}>
+      headings={["Product UUID", "Product Code", "Display name", "Status", "Local membership", "Exact GET verification"]}>
       {rows.map((item) => {
         const membership = membershipStatuses[item.productId] ?? "MEMBERSHIP_UNAVAILABLE";
+        const current = membership === "NOT_VERIFIED" && verification?.productId === item.productId
+          ? verification : null;
         return <tr key={item.productId} data-product-id={item.productId}>
         <td>{item.productId}</td><td>{item.productCode}</td>
         <td>{item.displayName?.trim() || "名称不可用"}</td>
         <td>{item.status}</td>
         <td><span data-membership-status={membership}>{membershipCopy[membership]}</span></td>
+        <td><span role="status" data-verification-status={current?.phase ?? "NOT_VERIFIED"}>
+          {current?.phase === "VERIFYING" ? "Verifying…" :
+            current?.phase === "EXPIRED" ? "Verification Expired — verify again" :
+              current?.phase === "FAILED" ? "Verification Error — no trusted result" :
+                current?.phase === "RESULT" && current.status ? verificationCopy[current.status] :
+                  membership === "NOT_VERIFIED" ? "Not Verified" : "Local draft fact; exact check unavailable"}
+        </span>{membership === "NOT_VERIFIED" && canVerify &&
+          <button type="button" disabled={pending || current?.phase === "VERIFYING"}
+            onClick={() => onVerify(item.productId)}>Verify Membership</button>}</td>
       </tr>; })}
     </AdminTable>}
     <nav className="admin-product-pagination" aria-label="Candidate product pages">

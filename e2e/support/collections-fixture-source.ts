@@ -52,6 +52,16 @@ export function createCollectionsFixtureSource(state: string): CatalogReadSource
   const sourceRows = state === "collections-empty" ? [] : rows;
   return { ...notConfiguredCatalogSource,
     mode: "offline",
+    async checkAdminCollectionMembership(collectionId: string, productId: string) {
+      if (state === "collections-check-delay")
+        await new Promise((resolve) => setTimeout(resolve, 1600));
+      if (state === "collections-check-error") throw Error("private://membership-check-secret");
+      return { collectionId, productId, complete: state !== "collections-check-incomplete",
+        collectionExists: sourceRows.some((row) => row.id === collectionId),
+        productExists: productRows.some((row) => row.product.id === productId),
+        membershipExists: memberRows.some((row) => row.collection_id === collectionId &&
+          row.product_id === productId) };
+    },
     async listAdmin(query) {
       if (state === "collections-candidates-not-connected") throw new CatalogReadError("NOT_CONFIGURED");
       if (state === "collections-candidates-error") throw Error("private://candidate-source-secret");

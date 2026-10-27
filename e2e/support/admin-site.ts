@@ -218,6 +218,8 @@ export async function startAdminFixture() {
     writeFileSync(join(fixtureRoot, "src/lib/catalog-read/server.ts"), catalogFixture);
     cpSync(join(repositoryRoot, "e2e/support/collections-fixture-source.ts"),
       join(fixtureRoot, "src/lib/catalog-read/collections-fixture-source.ts"));
+    cpSync(join(repositoryRoot, "e2e/support/collection-membership-check-fixture-route.ts"),
+      join(fixtureRoot, "src/app/api/admin/collections/[collectionId]/membership-check/route.ts"));
     const categoryRefreshRoute = join(fixtureRoot, "src/app/admin/(workspace)/category-refresh-fixture");
     mkdirSync(categoryRefreshRoute, { recursive: true });
     cpSync(join(repositoryRoot, "e2e/support/category-refresh-page.tsx"), join(categoryRefreshRoute, "page.tsx"));

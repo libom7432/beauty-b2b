@@ -20,7 +20,7 @@ test("candidate search uses isolated read-only pages, mixed names and signed cur
   await expect(candidates).toContainText("cannot prove that a product is not already associated");
   await expect(candidates.locator("tbody tr")).toHaveCount(20);
   await expect(candidates.getByRole("button", { name: "Add Candidate" })).toHaveCount(0);
-  await expect(candidates.getByRole("button", { name: /Verify Membership|Add to Draft/i })).toHaveCount(0);
+  await expect(candidates.getByRole("button", { name: "Add to Draft" })).toHaveCount(0);
   const editors = page.getByTestId("collection-editors");
   await expect(editors).toHaveAttribute("data-collection-id", id(1));
   await expect(editors.getByRole("region", { name: "Candidate product search" })).toHaveCount(1);
@@ -46,6 +46,235 @@ test("candidate search uses isolated read-only pages, mixed names and signed cur
   await expect(candidates.getByRole("searchbox")).toHaveValue("");
   await expect(candidates).not.toContainText("private/");
   expect(writes).toEqual([]);
+});
+
+test("exact GET verification stays separate from local member facts and never writes", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (!["GET", "HEAD"].includes(request.method())) writes.push(request.method());
+  });
+  await page.goto(detailUrl(1));
+  const candidates = page.getByRole("region", { name: "Candidate product search" });
+  const member = page.getByRole("region", { name: "Local collection membership editor" });
+  const row101 = candidates.locator(`tr[data-product-id="${id(101)}"]`);
+  await expect(row101).toContainText("Already in Collection");
+  await expect(row101.getByRole("button", { name: "Verify Membership" })).toHaveCount(0);
+  await member.locator(`[data-product-id="${id(101)}"]`).getByRole("button", { name: "Remove locally" }).click();
+  await expect(row101).toContainText("Pending Removal");
+  await expect(row101.getByRole("button", { name: "Verify Membership" })).toHaveCount(0);
+  page.once("dialog", async (dialog) => { await dialog.accept(); });
+  await page.goto(detailUrl(2));
+  const candidate = candidates.locator(`tr[data-product-id="${id(101)}"]`);
+  await expect(candidate).toContainText("Membership Not Verified");
+  await candidate.getByRole("button", { name: "Verify Membership" }).click();
+  await expect(candidate).toContainText("Not a Member — Verified for this view only");
+  await expect(candidate).toContainText("Membership Not Verified");
+  await expect(candidate.getByRole("button", { name: "Add to Draft" })).toHaveCount(0);
+  await candidates.getByRole("searchbox").fill("FAMILY-102");
+  await candidates.getByRole("button", { name: "Search candidates" }).click();
+  await expect(page).toHaveURL(/candidate_q=FAMILY-102/);
+  await expect(candidates).not.toContainText("Not a Member — Verified for this view only");
+  expect(writes).toEqual([]);
+});
+
+test("an unobserved existing member is verified by exact GET without changing its local label", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(detailUrl(1));
+  const candidates = page.getByRole("region", { name: "Candidate product search" });
+  await candidates.getByRole("searchbox").fill("FAMILY-130");
+  await candidates.getByRole("button", { name: "Search candidates" }).click();
+  const row = candidates.locator(`tr[data-product-id="${id(130)}"]`);
+  await expect(row).toContainText("Membership Not Verified");
+  await row.getByRole("button", { name: "Verify Membership" }).click();
+  await expect(row).toContainText("Member (exact GET check)");
+  await expect(row).toContainText("Membership Not Verified");
+});
+
+test("exact GET reports each source failure and rejects malformed responses", async ({ page, context }) => {
+  const cases = [
+    ["collections-check-not-connected", "Verification Not Connected"],
+    ["collections-check-error", "Verification Error"],
+    ["collections-check-incomplete", "Verification Incomplete"],
+    ["collections-check-bad-dto", "Verification Error — no trusted result"],
+    ["collections-check-extra-dto", "Verification Error — no trusted result"],
+    ["collections-check-non-json", "Verification Error — no trusted result"],
+  ] as const;
+  for (const [fixture, label] of cases) {
+    await fixtureCookies(context, fixture);
+    await page.goto(detailUrl(2));
+    const row = page.getByRole("region", { name: "Candidate product search" })
+      .locator(`tr[data-product-id="${id(101)}"]`);
+    await row.getByRole("button", { name: "Verify Membership" }).click();
+    await expect(row).toContainText(label);
+    await expect(row).toContainText("Membership Not Verified");
+  }
+});
+
+test("delayed verification is cancelled on query change and expires automatically", async ({ page, context }) => {
+  await fixtureCookies(context, "collections-check-delay");
+  await page.clock.install();
+  await page.goto(detailUrl(2));
+  const candidates = page.getByRole("region", { name: "Candidate product search" });
+  const row = candidates.locator(`tr[data-product-id="${id(101)}"]`);
+  await row.getByRole("button", { name: "Verify Membership" }).click();
+  await expect(row).toContainText("Verifying…");
+  await expect(row.getByRole("button", { name: "Verify Membership" })).toBeDisabled();
+  await candidates.getByRole("searchbox").fill("FAMILY-102");
+  await candidates.getByRole("button", { name: "Search candidates" }).click();
+  await expect(page).toHaveURL(/candidate_q=FAMILY-102/);
+  await expect(candidates).not.toContainText("Verifying…");
+  const next = candidates.locator(`tr[data-product-id="${id(102)}"]`);
+  await next.getByRole("button", { name: "Verify Membership" }).click();
+  await expect(next).toContainText("Not a Member — Verified for this view only");
+  await page.clock.fastForward(30_001);
+  await expect(next).toContainText("Verification Expired — verify again");
+  await expect(next.getByRole("button", { name: "Verify Membership" })).toBeEnabled();
+});
+
+test("a throttled expiry timer is corrected on visible resume and window focus", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.clock.install();
+  await page.goto(detailUrl(2));
+  await page.evaluate(() => {
+    const delayed: Array<() => void> = [];
+    (window as Window & { delayedVerificationTimers?: Array<() => void> }).delayedVerificationTimers = delayed;
+    const originalSetTimeout = window.setTimeout.bind(window);
+    window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (typeof handler === "function" && timeout !== undefined && timeout > 29_000 && timeout <= 30_000) {
+        delayed.push(() => handler(...args));
+        return originalSetTimeout(() => {}, 120_000);
+      }
+      return originalSetTimeout(handler, timeout, ...args);
+    }) as typeof window.setTimeout;
+  });
+  const candidates = page.getByRole("region", { name: "Candidate product search" });
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  const member = page.getByRole("region", { name: "Local collection membership editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Expiry resume keeps this draft");
+  await member.getByRole("button", { name: "Remove locally" }).click();
+  const row = candidates.locator(`tr[data-product-id="${id(101)}"]`);
+  const verify = row.getByRole("button", { name: "Verify Membership" });
+  await verify.click();
+  await expect(row).toContainText("Not a Member — Verified for this view only");
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { delayedVerificationTimers?: Array<() => void> }).delayedVerificationTimers?.length ?? 0))
+    .toBe(1);
+  await verify.click();
+  await expect(row).toContainText("Not a Member — Verified for this view only");
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { delayedVerificationTimers?: Array<() => void> }).delayedVerificationTimers?.length ?? 0))
+    .toBe(2);
+  await page.evaluate(() =>
+    (window as Window & { delayedVerificationTimers?: Array<() => void> }).delayedVerificationTimers?.[0]?.());
+  await expect(row).toContainText("Not a Member — Verified for this view only");
+  await page.clock.fastForward(30_001);
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(row).toContainText("Verification Expired — verify again");
+  await expect(row).not.toContainText("Not a Member — Verified for this view only");
+  await verify.click();
+  await expect(row).toContainText("Not a Member — Verified for this view only");
+  await page.clock.fastForward(30_001);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(row).toContainText("Verification Expired — verify again");
+  await expect(row).not.toContainText("Not a Member — Verified for this view only");
+  await expect(basic.getByLabel("English name")).toHaveValue("Expiry resume keeps this draft");
+  await expect(member.getByText("Unsaved membership changes")).toBeVisible();
+});
+
+test("a late old response cannot replace the newer product verification", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(detailUrl(2));
+  let releaseOld!: () => void;
+  let oldReceived!: () => void;
+  let oldHandled!: () => void;
+  const received = new Promise<void>((resolve) => { oldReceived = resolve; });
+  const handled = new Promise<void>((resolve) => { oldHandled = resolve; });
+  await page.route("**/membership-check?productId=*", async (route) => {
+    const productId = new URL(route.request().url()).searchParams.get("productId");
+    if (productId === id(101)) {
+      oldReceived();
+      await new Promise<void>((resolve) => { releaseOld = resolve; });
+    }
+    try {
+      await route.fulfill({ status: 200, contentType: "application/json",
+        headers: { "Cache-Control": "private, no-store" },
+        body: JSON.stringify({ collectionId: id(2), productId,
+          status: "NOT_MEMBER", origin: "OFFLINE_FIXTURE" }) });
+    } catch { /* An aborted old request is an expected outcome. */ }
+    if (productId === id(101)) oldHandled();
+  });
+  const candidates = page.getByRole("region", { name: "Candidate product search" });
+  const first = candidates.locator(`tr[data-product-id="${id(101)}"]`);
+  const second = candidates.locator(`tr[data-product-id="${id(102)}"]`);
+  await first.getByRole("button", { name: "Verify Membership" }).click();
+  await received;
+  await expect(first).toContainText("Verifying…");
+  await second.getByRole("button", { name: "Verify Membership" }).click();
+  await expect(second).toContainText("Not a Member — Verified for this view only");
+  releaseOld();
+  await handled;
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(second).toContainText("Not a Member — Verified for this view only");
+  await expect(first).not.toContainText("Not a Member — Verified for this view only");
+});
+
+test("both local drafts survive Verify and browser history does not restore an old check", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(detailUrl(2));
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  const member = page.getByRole("region", { name: "Local collection membership editor" });
+  const candidates = page.getByRole("region", { name: "Candidate product search" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Basic remains dirty");
+  await member.getByRole("button", { name: "Remove locally" }).click();
+  const row = candidates.locator(`tr[data-product-id="${id(101)}"]`);
+  await row.getByRole("button", { name: "Verify Membership" }).click();
+  await expect(row).toContainText("Not a Member — Verified for this view only");
+  await expect(basic.getByLabel("English name")).toHaveValue("Basic remains dirty");
+  await expect(member.getByText("Unsaved membership changes")).toBeVisible();
+  await candidates.getByRole("searchbox").fill("FAMILY-102");
+  await candidates.getByRole("button", { name: "Search candidates" }).click();
+  await expect(page).toHaveURL(/candidate_q=FAMILY-102/);
+  await page.goBack();
+  await expect(page).not.toHaveURL(/candidate_q=FAMILY-102/);
+  await expect(row).toContainText("Not Verified");
+  await expect(row).not.toContainText("Not a Member — Verified for this view only");
+  await expect(basic.getByLabel("English name")).toHaveValue("Basic remains dirty");
+  await expect(member.getByText("Unsaved membership changes")).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(/candidate_q=FAMILY-102/);
+  await expect(candidates).not.toContainText("Not a Member — Verified for this view only");
+  page.once("dialog", async (dialog) => { await dialog.accept(); });
+  await page.goto(detailUrl(1));
+  await expect(candidates).not.toContainText("Not a Member — Verified for this view only");
+});
+
+test("status filtering and candidate pagination invalidate an exact check", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  await page.goto(detailUrl(2));
+  const candidates = page.getByRole("region", { name: "Candidate product search" });
+  const row101 = candidates.locator(`tr[data-product-id="${id(101)}"]`);
+  await row101.getByRole("button", { name: "Verify Membership" }).click();
+  await expect(row101).toContainText("Not a Member — Verified for this view only");
+  await candidates.getByLabel("Product status").selectOption("draft");
+  await candidates.getByRole("button", { name: "Search candidates" }).click();
+  await expect(page).toHaveURL(/candidate_status=draft/);
+  await expect(candidates).not.toContainText("Not a Member — Verified for this view only");
+  await candidates.getByRole("button", { name: "Clear candidate filters" }).click();
+  await expect(page).not.toHaveURL(/candidate_status=/);
+  await row101.getByRole("button", { name: "Verify Membership" }).click();
+  await expect(row101).toContainText("Not a Member — Verified for this view only");
+  await candidates.getByRole("button", { name: "Next" }).click();
+  await expect(page).toHaveURL(/candidate_cursor=/);
+  await expect(candidates).not.toContainText("Not a Member — Verified for this view only");
+  await candidates.getByRole("button", { name: "Previous" }).click();
+  await expect(page).toHaveURL(/candidate_direction=before/);
+  await expect(row101).toBeVisible();
+  await expect(row101).toContainText("Not Verified");
+  await expect(row101).not.toContainText("Not a Member — Verified for this view only");
 });
 
 test("candidate membership labels follow the single local draft across navigation", async ({ page, context }) => {

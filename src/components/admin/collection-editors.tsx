@@ -1,19 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ComponentProps } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
 import type { AdminCollectionDetailResult, AdminCollectionMemberListResult } from "@/lib/catalog-read/types";
 import { changeMembershipOrder, createMembershipDraft, discardMembershipDraft,
   ingestMembershipPage, markMembershipRemoved, membershipIsDirty,
   sortedMembershipEntries, validateMembershipDraft } from "@/lib/admin/collection-membership-draft";
 import { candidateLocalMembershipStatus } from "@/lib/admin/collection-candidate-membership-status";
+import { candidateVerificationViewKey, isCurrentVerification, isFreshNotMemberVerification,
+  readMembershipCheckResponse, verificationHasExpired,
+  type VerificationIdentity, type VerifiedObservation } from "@/lib/admin/collection-membership-verification";
 import { useAdminUnsavedChanges } from "./admin-unsaved-changes";
 import { CollectionBasicEditor } from "./collection-basic-editor";
-import { CollectionCandidateSearch } from "./collection-candidate-search";
+import { CollectionCandidateSearch, type CandidateVerificationDisplay } from "./collection-candidate-search";
+
+type VerificationState = Readonly<{ phase: "VERIFYING" | "FAILED" | "EXPIRED";
+  identity: VerificationIdentity }> | Readonly<{ phase: "RESULT";
+  identity: VerifiedObservation }>;
 
 export function CollectionEditors({ collectionId, detail, members, pageKey, candidate }: {
   collectionId: string; detail: AdminCollectionDetailResult;
   members: AdminCollectionMemberListResult | null; pageKey: string;
-  candidate?: Omit<ComponentProps<typeof CollectionCandidateSearch>, "membershipStatuses"> | null;
+  candidate?: Omit<ComponentProps<typeof CollectionCandidateSearch>, "membershipStatuses" |
+    "verification" | "canVerify" | "onVerify" | "onInvalidateVerification"> | null;
 }) {
   const { setDirty } = useAdminUnsavedChanges();
   const [basicDirty, setBasicDirty] = useState(false);
@@ -51,6 +59,118 @@ export function CollectionEditors({ collectionId, detail, members, pageKey, cand
   const rejectedPages = draft.pages.filter((page) => page.status === "REJECTED").length;
   const membershipStatuses = Object.fromEntries((candidate?.result.items ?? []).map((item) =>
     [item.productId, candidateLocalMembershipStatus(draft, item.productId, members?.state ?? null)]));
+  const viewKey = candidate ? candidateVerificationViewKey(collectionId, candidate.query,
+    candidate.result, !!candidate.urlPaused, `${pageKey}:${members?.state ?? "NONE"}`) : "";
+  const sequenceRef = useRef(0);
+  const requestRef = useRef<AbortController | null>(null);
+  const [verification, setVerification] = useState<VerificationState | null>(null);
+  const canVerify = sourceReady && !!candidate && candidate.result.state === "RESULTS" &&
+    !candidate.urlPaused && draft.sourceAnomalies.length === 0 &&
+    draft.draftConflicts.length === 0 && !draft.limitReached;
+  const [verificationOwner, setVerificationOwner] = useState(() => ({
+    key: viewKey, draft, canVerify, generation: 0 }));
+  // A changed view or draft gets a new identity before old results can render.
+  if (verificationOwner.key !== viewKey || verificationOwner.draft !== draft ||
+    verificationOwner.canVerify !== canVerify) {
+    setVerificationOwner({ key: viewKey, draft, canVerify,
+      generation: verificationOwner.generation + 1 });
+    setVerification(null);
+  }
+  const invalidateVerification = useCallback(() => {
+    sequenceRef.current++;
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setVerification(null);
+  }, []);
+  useEffect(() => {
+    sequenceRef.current++;
+    requestRef.current?.abort();
+    requestRef.current = null;
+  }, [viewKey, draft, canVerify]);
+  useEffect(() => () => { sequenceRef.current++; requestRef.current?.abort(); }, []);
+  const verify = (productId: string) => {
+    if (!canVerify || !candidate?.result.items.some((item) => item.productId === productId) ||
+      membershipStatuses[productId] !== "NOT_VERIFIED" ||
+      verification?.phase === "VERIFYING" && verification.identity.productId === productId) return;
+    invalidateVerification();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const identity: VerificationIdentity = { collectionId: collectionId.toLowerCase(),
+      productId, viewKey, generation: verificationOwner.generation,
+      sequence: sequenceRef.current, checkedAtMs: performance.now() };
+    const startingUrl = window.location.href;
+    setVerification({ phase: "VERIFYING", identity });
+    const isCurrent = () => !controller.signal.aborted && startingUrl === window.location.href &&
+      isCurrentVerification(identity, { collectionId: collectionId.toLowerCase(), productId,
+        viewKey, generation: verificationOwner.generation,
+        sequence: sequenceRef.current });
+    void (async () => {
+      try {
+        const url = `/api/admin/collections/${encodeURIComponent(collectionId)}/membership-check?productId=${encodeURIComponent(productId)}`;
+        const response = await fetch(url, { method: "GET", cache: "no-store", signal: controller.signal });
+        if (!isCurrent()) return;
+        if (response.status !== 200 || !response.headers.get("Content-Type")?.includes("application/json") ||
+          !response.headers.get("Cache-Control")?.includes("no-store")) {
+          setVerification({ phase: "FAILED", identity }); return;
+        }
+        const body: unknown = await response.json();
+        if (!isCurrent()) return;
+        const now = performance.now();
+        const observation = readMembershipCheckResponse(response.status, body, identity, now);
+        setVerification(observation ? { phase: "RESULT", identity: observation } :
+          { phase: now >= identity.checkedAtMs + 30_000 ? "EXPIRED" : "FAILED", identity });
+      } catch {
+        if (isCurrent()) setVerification({ phase: "FAILED", identity });
+      } finally { if (requestRef.current === controller) requestRef.current = null; }
+    })();
+  };
+  const expireCurrentVerification = useCallback((expected?: VerifiedObservation) => {
+    const nowMs = performance.now();
+    setVerification((current) => {
+      if (current?.phase !== "RESULT" || expected && current.identity !== expected ||
+        !canVerify || verificationOwner.key !== viewKey || verificationOwner.draft !== draft) return current;
+      const currentIdentity = { collectionId: collectionId.toLowerCase(),
+          productId: current.identity.productId, viewKey,
+          generation: verificationOwner.generation, sequence: sequenceRef.current };
+      const expired = current.identity.status === "NOT_MEMBER"
+        ? !isFreshNotMemberVerification(current.identity, currentIdentity, canVerify, nowMs)
+        : verificationHasExpired(current.identity, nowMs);
+      if (!isCurrentVerification(current.identity, currentIdentity) || !expired) return current;
+      return { phase: "EXPIRED", identity: current.identity };
+    });
+  }, [canVerify, collectionId, draft, verificationOwner, viewKey]);
+  useEffect(() => {
+    if (verification?.phase !== "RESULT") return;
+    const remaining = verification.identity.expiresAtMs - performance.now();
+    if (remaining <= 0) { expireCurrentVerification(verification.identity); return; }
+    const timer = window.setTimeout(() => expireCurrentVerification(verification.identity), remaining);
+    return () => window.clearTimeout(timer);
+  }, [verification, expireCurrentVerification]);
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") expireCurrentVerification();
+    };
+    const onFocus = () => expireCurrentVerification();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [expireCurrentVerification]);
+  // A separate render can happen while a background timer is delayed. Correct the
+  // stored phase before that render is painted, without reading time during render.
+  useLayoutEffect(() => {
+    if (verification?.phase === "RESULT") expireCurrentVerification();
+  });
+  const visibleVerification = verification && canVerify && verificationOwner.key === viewKey &&
+    verificationOwner.draft === draft &&
+    verification.identity.viewKey === viewKey &&
+    verification.identity.generation === verificationOwner.generation ? verification : null;
+  const candidateVerification: CandidateVerificationDisplay | null = visibleVerification
+    ? { productId: visibleVerification.identity.productId, phase: visibleVerification.phase,
+      status: visibleVerification.phase === "RESULT" ? visibleVerification.identity.status : undefined }
+    : null;
   return <div data-testid="collection-editors" data-collection-id={collectionId.toLowerCase()}>
     <CollectionBasicEditor detail={detail} onDirtyChange={reportBasicDirty} />
     {(detail.state === "COMPLETE" || membershipDirty) &&
@@ -110,6 +230,8 @@ export function CollectionEditors({ collectionId, detail, members, pageKey, cand
             <li key={reason}>{reason}: NOT_VERIFIED</li>)}</ul>
         </div>}
       </section>}
-    {candidate && <CollectionCandidateSearch {...candidate} membershipStatuses={membershipStatuses} />}
+    {candidate && <CollectionCandidateSearch {...candidate} membershipStatuses={membershipStatuses}
+      verification={candidateVerification} canVerify={canVerify} onVerify={verify}
+      onInvalidateVerification={invalidateVerification} />}
   </div>;
 }

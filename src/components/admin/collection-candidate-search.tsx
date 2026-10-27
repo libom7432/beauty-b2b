@@ -4,6 +4,7 @@ import { useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { CandidateQuery, CandidateResult } from "@/lib/admin/collection-candidate-search";
 import type { UrlEntry } from "@/lib/admin/collection-detail-query";
+import type { CandidateLocalMembershipStatus } from "@/lib/admin/collection-candidate-membership-status";
 import { AdminBadge, AdminTable } from "./ui";
 
 const stateCopy: Record<CandidateResult["state"], string> = {
@@ -16,14 +17,20 @@ const stateCopy: Record<CandidateResult["state"], string> = {
   INVALID_CURSOR: "Candidate cursor is invalid. Clear the cursor to start again.",
 };
 const urlPausedCopy = "Candidate read paused by URL parameters. Remove unsupported URL parameters before searching.";
+const membershipCopy: Record<CandidateLocalMembershipStatus, string> = {
+  DRAFT_ADDED: "Draft Added", PENDING_REMOVAL: "Pending Removal",
+  ALREADY_MEMBER: "Already in Collection", MEMBERSHIP_UNAVAILABLE: "Membership Status Unavailable",
+  NOT_VERIFIED: "Membership Not Verified",
+};
 
 export function CollectionCandidateSearch({ collectionId, memberUrlEntries, query, result, testData,
-  hasCandidateCursor, urlPaused = false,
+  hasCandidateCursor, urlPaused = false, membershipStatuses,
   nextHref, previousHref, firstHref }: {
   collectionId: string; memberUrlEntries: readonly UrlEntry[]; query: CandidateQuery;
   hasCandidateCursor: boolean;
   urlPaused?: boolean;
   result: CandidateResult; testData: boolean;
+  membershipStatuses: Readonly<Record<string, CandidateLocalMembershipStatus>>;
   nextHref: string | null; previousHref: string | null; firstHref: string;
 }) {
   const router = useRouter();
@@ -51,7 +58,7 @@ export function CollectionCandidateSearch({ collectionId, memberUrlEntries, quer
   const rows = displayState === "RESULTS" ? result.items : [];
   return <section className="admin-card admin-table-panel admin-candidate-panel" aria-label="Candidate product search">
     <div className="admin-table-top"><div><h2>Candidate product search</h2>
-      <p>Read-only search. This page cannot prove that a product is not already associated with this Collection.</p>
+      <p>Read-only search. Local membership labels reflect loaded draft facts only. This page cannot prove that a product is not already associated with this Collection.</p>
     </div><div className="admin-table-badges">{testData && <AdminBadge tone="warning">TEST DATA / LOCAL DEMO</AdminBadge>}
       <AdminBadge>{displayState}</AdminBadge></div></div>
     <form key={`${query.search}:${query.status}`} className="admin-candidate-filters" role="search" onSubmit={submit}>
@@ -71,12 +78,15 @@ export function CollectionCandidateSearch({ collectionId, memberUrlEntries, quer
       {query.search && ` · Search: ${query.search}`}{query.status !== "all" && ` · Status: ${query.status}`}
     </p>
     {rows.length > 0 && <AdminTable caption="Candidate products on current query page"
-      headings={["Product UUID", "Product Code", "Display name", "Status"]}>
-      {rows.map((item) => <tr key={item.productId}>
+      headings={["Product UUID", "Product Code", "Display name", "Status", "Local membership"]}>
+      {rows.map((item) => {
+        const membership = membershipStatuses[item.productId] ?? "MEMBERSHIP_UNAVAILABLE";
+        return <tr key={item.productId} data-product-id={item.productId}>
         <td>{item.productId}</td><td>{item.productCode}</td>
         <td>{item.displayName?.trim() || "名称不可用"}</td>
         <td>{item.status}</td>
-      </tr>)}
+        <td><span data-membership-status={membership}>{membershipCopy[membership]}</span></td>
+      </tr>; })}
     </AdminTable>}
     <nav className="admin-product-pagination" aria-label="Candidate product pages">
       {previousHref ? <button type="button" disabled={pending} onClick={() => navigate(previousHref)}>Previous</button>

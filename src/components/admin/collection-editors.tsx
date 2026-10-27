@@ -5,6 +5,7 @@ import type { AdminCollectionDetailResult, AdminCollectionMemberListResult } fro
 import { changeMembershipOrder, createMembershipDraft, discardMembershipDraft,
   ingestMembershipPage, markMembershipRemoved, membershipIsDirty,
   sortedMembershipEntries, validateMembershipDraft } from "@/lib/admin/collection-membership-draft";
+import { candidateLocalMembershipStatus } from "@/lib/admin/collection-candidate-membership-status";
 import { useAdminUnsavedChanges } from "./admin-unsaved-changes";
 import { CollectionBasicEditor } from "./collection-basic-editor";
 import { CollectionCandidateSearch } from "./collection-candidate-search";
@@ -12,7 +13,7 @@ import { CollectionCandidateSearch } from "./collection-candidate-search";
 export function CollectionEditors({ collectionId, detail, members, pageKey, candidate }: {
   collectionId: string; detail: AdminCollectionDetailResult;
   members: AdminCollectionMemberListResult | null; pageKey: string;
-  candidate?: ComponentProps<typeof CollectionCandidateSearch> | null;
+  candidate?: Omit<ComponentProps<typeof CollectionCandidateSearch>, "membershipStatuses"> | null;
 }) {
   const { setDirty } = useAdminUnsavedChanges();
   const [basicDirty, setBasicDirty] = useState(false);
@@ -48,7 +49,9 @@ export function CollectionEditors({ collectionId, detail, members, pageKey, cand
   const fullyAcceptedPages = draft.pages.filter((page) => page.status === "FULLY_ACCEPTED").length;
   const partiallyAcceptedPages = draft.pages.filter((page) => page.status === "PARTIALLY_ACCEPTED").length;
   const rejectedPages = draft.pages.filter((page) => page.status === "REJECTED").length;
-  return <>
+  const membershipStatuses = Object.fromEntries((candidate?.result.items ?? []).map((item) =>
+    [item.productId, candidateLocalMembershipStatus(draft, item.productId, members?.state ?? null)]));
+  return <div data-testid="collection-editors" data-collection-id={collectionId.toLowerCase()}>
     <CollectionBasicEditor detail={detail} onDirtyChange={reportBasicDirty} />
     {(detail.state === "COMPLETE" || membershipDirty) &&
       <section className="admin-card admin-editor admin-membership-editor" role="region"
@@ -107,6 +110,6 @@ export function CollectionEditors({ collectionId, detail, members, pageKey, cand
             <li key={reason}>{reason}: NOT_VERIFIED</li>)}</ul>
         </div>}
       </section>}
-    {candidate && <CollectionCandidateSearch {...candidate} />}
-  </>;
+    {candidate && <CollectionCandidateSearch {...candidate} membershipStatuses={membershipStatuses} />}
+  </div>;
 }

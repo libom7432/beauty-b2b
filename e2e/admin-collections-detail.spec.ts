@@ -21,7 +21,10 @@ test("candidate search uses isolated read-only pages, mixed names and signed cur
   await expect(candidates.locator("tbody tr")).toHaveCount(20);
   await expect(candidates.getByRole("button", { name: "Add Candidate" })).toHaveCount(0);
   await expect(candidates.getByRole("button", { name: /Verify Membership|Add to Draft/i })).toHaveCount(0);
-  await expect(page.locator(".admin-membership-editor + .admin-candidate-panel")).toHaveCount(1);
+  const editors = page.getByTestId("collection-editors");
+  await expect(editors).toHaveAttribute("data-collection-id", id(1));
+  await expect(editors.getByRole("region", { name: "Candidate product search" })).toHaveCount(1);
+  await expect(editors.getByRole("region", { name: "Local collection membership editor" })).toHaveCount(1);
   await candidates.getByRole("button", { name: "Next" }).click();
   await expect(page).toHaveURL(/candidate_cursor=/);
   await expect(candidates.locator("tbody tr")).toHaveCount(20);
@@ -42,6 +45,64 @@ test("candidate search uses isolated read-only pages, mixed names and signed cur
   await expect(candidates.getByLabel("Product status")).toHaveValue("all");
   await expect(candidates.getByRole("searchbox")).toHaveValue("");
   await expect(candidates).not.toContainText("private/");
+  expect(writes).toEqual([]);
+});
+
+test("candidate membership labels follow the single local draft across navigation", async ({ page, context }) => {
+  await fixtureCookies(context, "collections");
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (!["GET", "HEAD"].includes(request.method())) writes.push(`${request.method()} ${request.url()}`);
+  });
+  await page.goto(detailUrl(1));
+  const editors = page.getByTestId("collection-editors");
+  const candidates = editors.getByRole("region", { name: "Candidate product search" });
+  const member = editors.getByRole("region", { name: "Local collection membership editor" });
+  const basic = editors.getByRole("region", { name: "Local collection basic editor" });
+  const candidateRow = (n: number) => candidates.locator(`tr[data-product-id="${id(n)}"]`);
+  const memberRow = member.locator(`[data-product-id="${id(101)}"]`);
+  await expect(candidateRow(101)).toContainText("Already in Collection");
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Basic only marker check");
+  await expect(candidateRow(101)).toContainText("Already in Collection");
+  await memberRow.getByRole("button", { name: "Remove locally" }).click();
+  await expect(candidateRow(101)).toContainText("Pending Removal");
+  await memberRow.getByRole("button", { name: "Restore locally" }).click();
+  await expect(candidateRow(101)).toContainText("Already in Collection");
+  await memberRow.getByRole("button", { name: "Remove locally" }).click();
+  await member.getByRole("button", { name: "Discard membership changes" }).click();
+  await expect(candidateRow(101)).toContainText("Already in Collection");
+  await memberRow.getByLabel("Local sort order for FAMILY-101").fill("-5");
+  await candidates.getByRole("searchbox").fill("FAMILY-101");
+  await candidates.getByRole("button", { name: "Search candidates" }).click();
+  await expect(page).toHaveURL(/candidate_q=FAMILY-101/);
+  await expect(candidateRow(101)).toContainText("Already in Collection");
+  await expect(basic.getByLabel("English name")).toHaveValue("Basic only marker check");
+  await candidates.getByLabel("Product status").selectOption("draft");
+  await candidates.getByRole("button", { name: "Search candidates" }).click();
+  await expect(page).toHaveURL(/candidate_status=draft/);
+  await expect(candidateRow(101)).toContainText("Already in Collection");
+  await candidates.getByRole("button", { name: "Clear candidate filters" }).click();
+  await expect(page).not.toHaveURL(/candidate_q=|candidate_status=/);
+  await candidates.getByRole("button", { name: "Next" }).click();
+  await expect(page).toHaveURL(/candidate_cursor=/);
+  await expect(candidateRow(130)).toContainText("Membership Not Verified");
+  page.once("dialog", async (dialog) => { await dialog.accept(); });
+  await page.getByRole("navigation", { name: "Collection member pages" }).getByRole("link", { name: "Next" }).click();
+  await expect(page).toHaveURL(/[?&]cursor=/);
+  await expect(candidateRow(130)).toContainText("Already in Collection");
+  await expect(basic.getByLabel("English name")).toHaveValue("Basic only marker check");
+  await candidates.getByRole("button", { name: "Previous" }).click();
+  await expect(candidateRow(101)).toContainText("Already in Collection");
+  await basic.getByRole("button", { name: "Discard changes" }).click();
+  await member.getByRole("button", { name: "Discard membership changes" }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event); return event.defaultPrevented;
+  })).toBe(false);
+  await page.goto(detailUrl(2));
+  await expect(editors).toHaveAttribute("data-collection-id", id(2));
+  await expect(candidateRow(101)).toContainText("Membership Not Verified");
   expect(writes).toEqual([]);
 });
 

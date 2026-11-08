@@ -2688,6 +2688,113 @@ test("losing focus hides the draft before another tab changes administrator iden
   await expect(page.getByText("A before background")).toHaveCount(0);
 });
 
+test("desktop sidebar cancel and confirm use the shared guard and preserve history", async ({ page, context }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome", "Desktop sidebar only");
+  await fixtureCookies(context, "collections", "editor");
+  await page.goto(detailUrl(1));
+  const basic = () => page.getByRole("region", { name: "Local collection basic editor" });
+  await basic().getByRole("button", { name: "Edit local draft" }).click();
+  await basic().getByLabel("English name").fill("Sidebar draft");
+  let nativeDialogs = 0;
+  page.on("dialog", (dialog) => { nativeDialogs++; void dialog.dismiss(); });
+  const dashboard = page.getByRole("complementary", { name: "Admin sidebar" })
+    .getByRole("link", { name: "Dashboard" });
+  await dashboard.click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
+  await expect(page).toHaveURL(detailUrl(1));
+  await expect(basic().getByLabel("English name")).toHaveValue("Sidebar draft");
+  expect((await context.request.get(`${fixtureOrigin}/api/admin/session-identity`)).status()).toBe(200);
+  expect(nativeDialogs).toBe(0);
+  await dashboard.click();
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
+  await page.goBack();
+  await expect(page).toHaveURL(detailUrl(1));
+  await basic().getByRole("button", { name: "Edit local draft" }).click();
+  await expect(basic().getByLabel("English name")).toHaveValue("Sidebar draft");
+});
+
+test("mobile menu cancel and confirm use the shared guard", async ({ page, context }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile-chrome", "Mobile menu only");
+  await fixtureCookies(context, "collections", "editor");
+  await page.goto(detailUrl(1));
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Mobile sidebar draft");
+  let nativeDialogs = 0;
+  page.on("dialog", (dialog) => { nativeDialogs++; void dialog.dismiss(); });
+  const menu = page.getByRole("dialog", { name: "Admin menu" });
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  const menuButton = page.getByRole("button", { name: "Open admin menu" });
+  await menuButton.click();
+  await menu.getByRole("link", { name: "Dashboard" }).click();
+  await expect(menu).toBeHidden();
+  await expect(guard).toBeVisible();
+  await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
+  await expect(page).toHaveURL(detailUrl(1));
+  await expect(basic.getByLabel("English name")).toHaveValue("Mobile sidebar draft");
+  expect((await context.request.get(`${fixtureOrigin}/api/admin/session-identity`)).status()).toBe(200);
+  expect(nativeDialogs).toBe(0);
+  await menuButton.click();
+  await menu.getByRole("link", { name: "Dashboard" }).click();
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
+});
+
+test("clean formal sidebar navigation has no confirmation", async ({ page, context }, testInfo) => {
+  await fixtureCookies(context, "collections", "editor");
+  await page.goto(detailUrl(1));
+  if (testInfo.project.name === "mobile-chrome") {
+    await page.getByRole("button", { name: "Open admin menu" }).click();
+    await page.getByRole("dialog", { name: "Admin menu" })
+      .getByRole("link", { name: "Dashboard" }).click();
+  } else {
+    await page.getByRole("complementary", { name: "Admin sidebar" })
+      .getByRole("link", { name: "Dashboard" }).click();
+  }
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
+  await expect(page.getByRole("dialog", { name: /Unsaved local changes/ })).toBeHidden();
+});
+
+test("repeated formal sidebar clicks and approvals navigate once", async ({ page, context }, testInfo) => {
+  await fixtureCookies(context, "collections", "editor");
+  await page.goto(detailUrl(1));
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("One sidebar navigation");
+  if (testInfo.project.name === "mobile-chrome")
+    await page.getByRole("button", { name: "Open admin menu" }).click();
+  await page.evaluate((mobile) => {
+    const selector = mobile ? ".admin-mobile-dialog .admin-nav-link" : ".admin-sidebar .admin-nav-link";
+    const dashboard = document.querySelector<HTMLAnchorElement>(selector);
+    dashboard?.click();
+    dashboard?.click();
+  }, testInfo.project.name === "mobile-chrome");
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(guard).toBeHidden();
+  await expect(page).toHaveURL(detailUrl(1));
+  await expect(basic.getByLabel("English name")).toHaveValue("One sidebar navigation");
+  if (testInfo.project.name === "mobile-chrome")
+    await page.getByRole("button", { name: "Open admin menu" }).click();
+  await page.evaluate((mobile) => {
+    const selector = mobile ? ".admin-mobile-dialog .admin-nav-link" : ".admin-sidebar .admin-nav-link";
+    document.querySelector<HTMLAnchorElement>(selector)?.click();
+  }, testInfo.project.name === "mobile-chrome");
+  await expect(guard).toBeVisible();
+  await page.evaluate(() => {
+    const approve = document.querySelector<HTMLButtonElement>(".admin-guard-actions button:last-child");
+    approve?.click();
+    approve?.click();
+  });
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
+  await page.goBack();
+  await expect(page).toHaveURL(detailUrl(1));
+});
+
 test("a failed sign-out rechecks identity and preserves the same session draft", async ({ page, context }) => {
   await fixtureCookies(context, "collections", "editor");
   await page.goto(detailUrl(1));

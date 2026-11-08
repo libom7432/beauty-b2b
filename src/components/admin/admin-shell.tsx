@@ -26,11 +26,16 @@ function SidebarContents({ items, pathname, onNavigate, onClose, closeButton }: 
   items: readonly AdminNavItem[]; pathname: string; onNavigate?: () => void;
   onClose?: () => void; closeButton?: React.RefObject<HTMLButtonElement | null>;
 }) {
-  const { confirmNavigation } = useAdminUnsavedChanges();
+  const { requestNavigation } = useAdminUnsavedChanges();
+  const navigate = (target: string) => {
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const result = requestNavigation({ type: "PUSH", scope: "GLOBAL", target, trigger });
+    if (result === "EXECUTED") onNavigate?.();
+  };
   return <>
     <div className="admin-sidebar-top">
       <Link href="/admin" className="admin-brand"
-        onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); else onNavigate?.(); }}>
+        onNavigate={(event) => { event.preventDefault(); navigate("/admin"); }}>
         <span className="admin-brand-mark" aria-hidden="true">B.</span>
         <span><strong>BEAUTY B2B</strong><small>ADMIN CONSOLE</small></span>
       </Link>
@@ -42,7 +47,7 @@ function SidebarContents({ items, pathname, onNavigate, onClose, closeButton }: 
         const current = pathname === item.href || (item.href !== "/admin" && pathname.startsWith(`${item.href}/`));
         return <Link key={item.href} href={item.href} aria-current={current ? "page" : undefined}
           className={`admin-nav-link${current ? " admin-nav-link-active" : ""}`}
-          onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); else onNavigate?.(); }}>
+          onNavigate={(event) => { event.preventDefault(); navigate(item.href); }}>
           <span>{item.label}</span><span className="admin-nav-number" aria-hidden="true">{item.number}</span>
         </Link>;
       })}
@@ -178,6 +183,7 @@ export function AdminShell(props: { children: ReactNode; items: readonly AdminNa
   const sequence = useRef(0);
   const request = useRef<AbortController | null>(null);
   const invalidateGuard = useRef<(() => void) | null>(null);
+  const invalidateCurrentGuard = useCallback(() => invalidateGuard.current?.(), []);
   const catalogRoute = requiresCatalogRead(pathname);
   const catalogDenied = catalogRoute && revokedRoute === routeKey;
   const active = identity.phase === "VERIFIED" && identity.routeKey === routeKey &&
@@ -268,8 +274,8 @@ export function AdminShell(props: { children: ReactNode; items: readonly AdminNa
   useEffect(() => {
     let mounted = true;
     queueMicrotask(() => { if (mounted) verifyIdentity(false, routeKey); });
-    return () => { mounted = false; request.current?.abort(); invalidateGuard.current?.(); owner.lock(); };
-  }, [verifyIdentity, owner, routeKey]);
+    return () => { mounted = false; request.current?.abort(); invalidateCurrentGuard(); owner.lock(); };
+  }, [verifyIdentity, owner, routeKey, invalidateCurrentGuard]);
   useEffect(() => {
     const onHidden = () => {
       ++sequence.current;

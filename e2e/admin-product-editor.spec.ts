@@ -5,6 +5,33 @@ test.beforeAll(async () => { await startAdminFixture(); });
 test.afterAll(async () => { await stopAdminFixture(); });
 test.setTimeout(120_000);
 
+test("dirty product detail breadcrumb uses the shared guard", async ({ page, context }) => {
+  await fixtureCookies(context, "success");
+  await page.goto(`${fixtureOrigin}/admin/products/id/00000002-0000-4000-8000-000000000000`);
+  await page.getByRole("button", { name: "Edit local draft" }).click();
+  const editor = page.getByRole("region", { name: "Local product editor" });
+  await editor.getByRole("group", { name: "English translation" })
+    .getByLabel("Name").fill("Keep product draft");
+  let nativeDialogs = 0;
+  page.on("dialog", (dialog) => { nativeDialogs++; void dialog.dismiss(); });
+  const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "Products" });
+  await breadcrumb.focus();
+  await breadcrumb.click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
+  await expect(breadcrumb).toBeFocused();
+  await expect(page).toHaveURL(/\/admin\/products\/id\/00000002-0000-4000-8000-000000000000$/);
+  await expect(editor.getByRole("group", { name: "English translation" })
+    .getByLabel("Name")).toHaveValue("Keep product draft");
+  expect(nativeDialogs).toBe(0);
+  await breadcrumb.click();
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  expect(nativeDialogs).toBe(0);
+});
+
 test("local draft edits and discard restore the original without a save action", async ({ page, context }) => {
   await fixtureCookies(context, "success");
   await page.goto(`${fixtureOrigin}/admin/products/id/00000002-0000-4000-8000-000000000000`);
@@ -153,12 +180,12 @@ test("controlled links warn; refresh discards; anonymous and forbidden access ex
   const mobileMenu = page.getByRole("button", { name: "Open admin menu" });
   const isMobile = await mobileMenu.isVisible();
   if (isMobile) await mobileMenu.click();
-  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.dismiss(); });
   const navigation = isMobile ? page.getByRole("dialog", { name: "Admin menu" }) :
     page.getByRole("complementary", { name: "Admin sidebar" });
   await navigation.getByRole("link", { name: "Categories", exact: true }).click();
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Stay and keep editing/ }).click();
   await expect(editor.getByText("Unsaved local changes")).toBeVisible();
-  if (isMobile) await page.keyboard.press("Escape");
   page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("beforeunload"); await dialog.accept(); });
   await page.reload();
   await page.getByRole("button", { name: "Edit local draft" }).click();

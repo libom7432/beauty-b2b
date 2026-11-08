@@ -60,7 +60,7 @@ function AdminShellContents({ children, items, administrator, onSignOut, onSignO
   children: ReactNode; items: readonly AdminNavItem[]; administrator: string;
   onSignOut: () => void; onSignOutFailure: () => void;
 }) {
-  const { confirmNavigation, registerDialogPreparation } = useAdminUnsavedChanges();
+  const { requestNavigation, registerDialogPreparation } = useAdminUnsavedChanges();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -71,6 +71,11 @@ function AdminShellContents({ children, items, administrator, onSignOut, onSignO
   const title = adminRouteLabel(pathname);
   const productDetail = pathname.startsWith("/admin/products/");
   const collectionDetail = isAdminCollectionDetailPath(pathname);
+
+  const navigateBreadcrumb = (target: string) => {
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    requestNavigation({ type: "PUSH", scope: "GLOBAL", target, trigger });
+  };
 
   const closeMenu = useCallback((restore: boolean) => {
     restoreFocus.current = restore;
@@ -156,8 +161,8 @@ function AdminShellContents({ children, items, administrator, onSignOut, onSignO
           </button>
           <div>
             <nav aria-label="Breadcrumb" className="admin-breadcrumb">
-              <Link href="/admin" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Admin</Link>
-              {pathname !== "/admin" && <><span aria-hidden="true">/</span>{productDetail ? <><Link href="/admin/products" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Products</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : collectionDetail ? <><Link href="/admin/collections" onNavigate={(event) => { if (!confirmNavigation()) event.preventDefault(); }}>Collections</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : <span aria-current="page">{title}</span>}</>}
+              <Link href="/admin" onNavigate={(event) => { event.preventDefault(); navigateBreadcrumb("/admin"); }}>Admin</Link>
+              {pathname !== "/admin" && <><span aria-hidden="true">/</span>{productDetail ? <><Link href="/admin/products" onNavigate={(event) => { event.preventDefault(); navigateBreadcrumb("/admin/products"); }}>Products</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : collectionDetail ? <><Link href="/admin/collections" onNavigate={(event) => { event.preventDefault(); navigateBreadcrumb("/admin/collections"); }}>Collections</Link><span aria-hidden="true">/</span><span aria-current="page">Detail</span></> : <span aria-current="page">{title}</span>}</>}
             </nav>
             <p className="admin-topbar-title">{title}</p>
           </div>

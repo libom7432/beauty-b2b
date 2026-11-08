@@ -2093,6 +2093,8 @@ test("Basic and Membership drafts share the Shell session across Admin history",
   await expect(row().getByRole("button", { name: "Restore locally" })).toBeVisible();
   await page.getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("link", { name: "Admin", exact: true }).click();
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Continue navigation/ }).click();
   await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
   await page.goBack();
   await expect(row().getByRole("button", { name: "Restore locally" })).toBeVisible();
@@ -2793,6 +2795,82 @@ test("repeated formal sidebar clicks and approvals navigate once", async ({ page
   await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
   await page.goBack();
   await expect(page).toHaveURL(detailUrl(1));
+});
+
+test("breadcrumb cancel and confirm use the shared guard on desktop and mobile", async ({ page, context }) => {
+  await fixtureCookies(context, "collections", "editor");
+  await page.goto(detailUrl(1));
+  const basic = () => page.getByRole("region", { name: "Local collection basic editor" });
+  await basic().getByRole("button", { name: "Edit local draft" }).click();
+  await basic().getByLabel("English name").fill("Breadcrumb draft");
+  let nativeDialogs = 0;
+  page.on("dialog", (dialog) => { nativeDialogs++; void dialog.dismiss(); });
+  const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "Collections" });
+  await breadcrumb.focus();
+  await breadcrumb.click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await expect(guard).toHaveAttribute("data-navigation-lifecycle", "CONFIRMING");
+  await page.keyboard.press("Escape");
+  await expect(guard).toBeHidden();
+  await expect(breadcrumb).toBeFocused();
+  await expect(page).toHaveURL(detailUrl(1));
+  await expect(basic().getByLabel("English name")).toHaveValue("Breadcrumb draft");
+  expect((await context.request.get(`${fixtureOrigin}/api/admin/session-identity`)).status()).toBe(200);
+  expect(nativeDialogs).toBe(0);
+  await breadcrumb.click();
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/collections`);
+  await page.goBack();
+  await expect(page).toHaveURL(detailUrl(1));
+  await basic().getByRole("button", { name: "Edit local draft" }).click();
+  await expect(basic().getByLabel("English name")).toHaveValue("Breadcrumb draft");
+});
+
+test("repeated breadcrumb clicks and approvals create only one history entry", async ({ page, context }) => {
+  await fixtureCookies(context, "collections", "editor");
+  await page.goto(detailUrl(1));
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("One breadcrumb navigation");
+  const before = await page.evaluate(() => history.length);
+  await page.evaluate(() => {
+    const link = document.querySelector<HTMLAnchorElement>('.admin-breadcrumb a[href="/admin"]');
+    link?.click();
+    link?.click();
+  });
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toHaveCount(1);
+  await expect(guard).toBeVisible();
+  await page.evaluate(() => {
+    const approve = document.querySelector<HTMLButtonElement>(".admin-guard-actions button:last-child");
+    approve?.click();
+    approve?.click();
+  });
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
+  expect(await page.evaluate(() => history.length)).toBe(before + 1);
+  await page.goBack();
+  await expect(page).toHaveURL(detailUrl(1));
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(basic.getByLabel("English name")).toHaveValue("One breadcrumb navigation");
+});
+
+test("clean Admin, Collections and Products breadcrumbs navigate without confirmation", async ({ page, context }) => {
+  await fixtureCookies(context, "collections", "editor");
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
+  await page.goto(detailUrl(1));
+  await breadcrumb.getByRole("link", { name: "Collections" }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/collections`);
+  await expect(guard).toBeHidden();
+  await page.goto(`${fixtureOrigin}/admin/products/FAMILY-2`);
+  await breadcrumb.getByRole("link", { name: "Products" }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  await expect(guard).toBeHidden();
+  await breadcrumb.getByRole("link", { name: "Admin", exact: true }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
+  await expect(guard).toBeHidden();
 });
 
 test("a failed sign-out rechecks identity and preserves the same session draft", async ({ page, context }) => {

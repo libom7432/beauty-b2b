@@ -4,6 +4,7 @@ import type { AdminCategoryOptions, AdminProductListDTO } from "@/lib/catalog-re
 import type { AdminProductsUrlQuery } from "@/lib/admin/products-query";
 import { adminProductsHref } from "@/lib/admin/products-query";
 import { adminProductIdDetailHref } from "@/lib/admin/product-detail-navigation";
+import { ProductListFilters } from "./product-list-filters";
 
 export type ProductListState = "not_connected" | "loading" | "empty" | "no_matches" |
   "success" | "source_unavailable" | "invalid_query";
@@ -22,28 +23,8 @@ export function ProductListPanel({ state, products = [], query, categories, cate
   const rows = state === "success" ? products : [];
   return <section className="admin-card admin-table-panel" aria-label="Product list">
     <div className="admin-table-top"><div><h2>Catalog products</h2><p>Product Code identifies a product family; Variant SKU identifies a purchasable specification.</p></div><div className="admin-table-badges">{testData && state === "success" && <AdminBadge tone="warning">TEST DATA</AdminBadge>}<AdminBadge>{state === "success" || state === "empty" || state === "no_matches" ? "Read only" : state === "loading" ? "Loading" : state === "source_unavailable" ? "Unavailable" : state === "invalid_query" ? "Invalid query" : "Not Connected"}</AdminBadge></div></div>
-    {query && <form className="admin-product-filters" action="/admin/products" method="get" role="search">
-      <label>Search products<input aria-label="Search products" name="q" type="search" maxLength={100} defaultValue={query.search} placeholder="Code or English / Chinese name" /></label>
-      <label>Status<select aria-label="Status" name="status" defaultValue={query.status}>
-        <option value="all">All</option><option value="draft">Draft</option>
-        <option value="published">Published</option><option value="retired">Retired</option>
-      </select></label>
-      <label>Primary category<select aria-label="Primary category" name="category" defaultValue={query.category}>
-        <option value="">All categories</option>
-        {query.category && !categories?.items.some((item) => item.id === query.category) &&
-          <option value={query.category}>Selected category unavailable</option>}
-        {categories?.items.map((item) => <option key={item.id} value={item.id}>{item.nameEn || item.nameZh || item.id}</option>)}
-      </select></label>
-      <label>Sort by<select aria-label="Sort by" name="sort" defaultValue={query.sort}>
-        <option value="updated_desc">Recently updated</option>
-        <option value="updated_asc">Oldest updated</option>
-        <option value="product_code_asc">Product code A–Z</option>
-        <option value="product_code_desc">Product code Z–A</option>
-      </select></label>
-      <div className="admin-product-filter-actions"><button type="submit">Apply Filters</button><Link href="/admin/products">Clear Filters</Link></div>
-      {categories?.hasMore && <p className="admin-category-limit">Only the first 50 primary categories are available in this selector.</p>}
-      {categoryOptionsUnavailable && <p className="admin-category-limit">Primary category options are not connected.</p>}
-    </form>}
+    {query && <ProductListFilters query={query} categories={categories}
+      categoryOptionsUnavailable={categoryOptionsUnavailable} />}
     <AdminTable caption="Catalog products" headings={["Product Code", "Product Name", "Product Type", "Status", "Primary Category", "Variants", "Updated At"]}>
       {rows.map((row) => <tr key={row.productCode}>
         <td><Link className="admin-inline-link" href={adminProductIdDetailHref(row.id,

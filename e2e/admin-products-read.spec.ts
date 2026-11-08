@@ -88,6 +88,144 @@ test("server query controls search, status, primary category and sorting", async
   await expect(page.getByText("TEST DATA", { exact: true })).toBeVisible();
 });
 
+test("Clear commits the server query and resets controls before Sort", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products?q=family-1&status=draft&category=00000702-0000-4000-8000-000000000000`);
+  await expect(page.getByRole("link", { name: "FAMILY-10" })).toBeVisible();
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/admin/products" && url.searchParams.has("_rsc"))
+      requests.push(`${url.searchParams.get("q") ?? ""}|${url.searchParams.get("status") ?? ""}|${url.searchParams.get("category") ?? ""}`);
+  });
+  await page.getByRole("link", { name: "Clear Filters" }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-1");
+  await expect(page.getByRole("searchbox", { name: "Search products" })).toHaveValue("");
+  await expect(page.getByLabel("Status", { exact: true })).toHaveValue("all");
+  await expect(page.getByLabel("Primary category")).toHaveValue("");
+  await expect(page.getByLabel("Sort by")).toHaveValue("updated_desc");
+  await page.getByLabel("Sort by").selectOption("product_code_desc");
+  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await expect(page).toHaveURL(/sort=product_code_desc/);
+  await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-9");
+  const final = new URL(page.url());
+  expect(final.searchParams.get("q")).toBe("");
+  expect(final.searchParams.get("status")).toBe("all");
+  expect(final.searchParams.get("category")).toBe("");
+  expect(requests.some((item) => item === "||")).toBe(true);
+  await page.goBack();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  await expect(page.getByLabel("Sort by")).toHaveValue("updated_desc");
+  await page.goForward();
+  await expect(page.getByLabel("Sort by")).toHaveValue("product_code_desc");
+  await page.getByRole("link", { name: "Clear Filters" }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  await page.getByRole("searchbox", { name: "Search products" }).fill("unsubmitted");
+  await page.getByRole("link", { name: "Clear Filters" }).click();
+  await expect(page.getByRole("searchbox", { name: "Search products" })).toHaveValue("");
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+});
+
+test("Clear in flight blocks stale Sort and supports explicit recovery", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products?q=family-1&status=draft&category=00000702-0000-4000-8000-000000000000`);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let observe!: () => void;
+  const observed = new Promise<void>((resolve) => { observe = resolve; });
+  const requests: string[] = [];
+  await page.route("**/admin/products*", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/admin/products" && url.searchParams.has("_rsc")) {
+      requests.push(url.search);
+      if (!url.searchParams.has("q") && !url.searchParams.has("sort")) {
+        observe();
+        await held;
+      }
+    }
+    await route.continue();
+  });
+  try {
+    await page.getByRole("link", { name: "Clear Filters" }).click();
+    await observed;
+    await expect(page.getByRole("searchbox", { name: "Search products" })).toBeDisabled();
+    await expect(page.getByLabel("Sort by")).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Apply Filters" })).toBeDisabled();
+    await expect(page.getByRole("status").first()).toContainText("Clearing filters");
+    await page.evaluate(() => {
+      document.querySelector<HTMLSelectElement>('select[name="sort"]')?.dispatchEvent(
+        new Event("change", { bubbles: true }));
+      document.querySelector<HTMLFormElement>(".admin-product-filters")?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(requests).toHaveLength(1);
+    await expect(page).toHaveURL(/q=family-1/);
+  } finally { release(); }
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  await expect(page.getByLabel("Sort by")).toBeEnabled();
+  await expect(page.getByLabel("Sort by")).toHaveValue("updated_desc");
+});
+
+test("hung Clear can resume without claiming the request was cancelled", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products?q=family-1&status=draft`);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let observe!: () => void;
+  const observed = new Promise<void>((resolve) => { observe = resolve; });
+  let finishOld!: () => void;
+  const oldFinished = new Promise<void>((resolve) => { finishOld = resolve; });
+  let clearRequests = 0;
+  await page.route("**/admin/products*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/admin/products" && url.searchParams.has("_rsc") && !url.searchParams.has("q")) {
+      clearRequests += 1;
+      observe();
+      await held;
+      try { await route.continue(); } finally { finishOld(); }
+      return;
+    }
+    await route.continue();
+  });
+  try {
+    await page.getByRole("link", { name: "Clear Filters" }).click();
+    await observed;
+    await page.getByRole("button", { name: "Resume editing filters" }).click();
+    await expect(page.getByRole("searchbox", { name: "Search products" })).toBeEnabled();
+    await expect(page.getByRole("status")).toContainText("earlier Clear Filters request may still finish");
+    await page.getByRole("searchbox", { name: "Search products" }).fill("family-12");
+    await page.evaluate(() => document.querySelector<HTMLAnchorElement>(
+      '.admin-product-filter-actions a')?.click());
+    expect(clearRequests).toBe(1);
+    await page.getByRole("button", { name: "Apply Filters" }).click();
+    await expect(page).toHaveURL(/q=family-12/);
+  } finally { release(); }
+  await oldFinished;
+  await expect(page).toHaveURL(/q=family-12/);
+  await expect(page.getByRole("searchbox", { name: "Search products" })).toHaveValue("family-12");
+});
+
+test("failed Clear RSC falls back without leaving the form locked", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products?q=family-1&status=draft`);
+  let failed = 0;
+  await page.route("**/admin/products*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/admin/products" && url.searchParams.has("_rsc") && !url.searchParams.has("q")) {
+      failed += 1;
+      await route.abort("failed");
+    } else await route.continue();
+  });
+  await page.getByRole("link", { name: "Clear Filters" }).click();
+  await expect.poll(() => failed).toBe(1);
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  await expect(page.getByLabel("Sort by")).toBeEnabled();
+  await expect(page.getByRole("searchbox", { name: "Search products" })).toHaveValue("");
+  await expect(page.getByLabel("Status", { exact: true })).toHaveValue("all");
+});
+
 test("English and Chinese names, each status and all four URL sorts reach the Repository", async ({ page, context }) => {
   await fixtureCookies(context, "query");
   for (const [query, code] of [["Family 12", "FAMILY-12"], ["家族 12", "FAMILY-12"]] as const) {

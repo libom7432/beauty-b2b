@@ -31,6 +31,7 @@ const ui = loadComponent("src/components/admin/ui.tsx");
 const { ProductListPanel } = loadComponent("src/components/admin/product-list-panel.tsx", {
   "./ui": ui, "@/lib/admin/products-query": { adminProductsHref },
   "@/lib/admin/product-detail-navigation": { adminProductIdDetailHref },
+  "./product-list-filters": { ProductListFilters: () => createElement("div") },
 });
 const render = (props) => renderToStaticMarkup(createElement(ProductListPanel, props));
 

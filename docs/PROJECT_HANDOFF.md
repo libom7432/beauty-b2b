@@ -1,9 +1,9 @@
 # Beauty B2B 项目交接入口
 
 更新时间：2026-11-08（Asia/Shanghai）
-对应代码 Commit：`326d86091a01e3d6ab5971cbf2c8f3282f4c7d04`
+对应最新代码 Commit：`1dd16e67e7008c29441656d6651a5aa4d3893ea5`（P2-F2；本文档自身的提交 Hash 与此不同）
 
-> 新对话先重新核对 Git 状态、代码和环境。本文记录上述 Commit 的仓库状态；历史阶段文档中的“计划”“本地通过”不等于当前生产验收。
+> 新对话先重新核对 Git 状态、代码和环境。本文基于上述代码 Commit 更新；文档提交 Hash 请用 `git log -1 -- docs/PROJECT_HANDOFF.md` 查询，编写时尚未生成。历史阶段文档中的“计划”“本地通过”不等于当前生产验收。
 
 ## 1. 项目概况
 
@@ -22,13 +22,14 @@
 | --- | --- |
 | 原始本地仓库 | 本文所在 Git 顶层目录 `.`；从任意子目录用 `git rev-parse --show-toplevel` 重新确认 |
 | 分支 | `main` |
-| HEAD | `326d86091a01e3d6ab5971cbf2c8f3282f4c7d04` |
+| 最新代码 Commit（本文更新前 HEAD） | `1dd16e67e7008c29441656d6651a5aa4d3893ea5`，`fix(admin): unify guarded breadcrumb navigation` |
+| 文档 Commit | 本文件所属的后续独立提交；Hash 请用 `git log -1 -- docs/PROJECT_HANDOFF.md` 查询 |
 | origin | `https://github.com/libom7432/beauty-b2b.git` |
-| 远端同步 | 前一轮 Push 后远端 `main` 与 HEAD 一致；本次本地检查 `origin/main...HEAD` 为 Behind 0 / Ahead 0，未再次 Fetch |
-| 工作区 | 仅 `docs/PROJECT_HANDOFF.md` 为未跟踪文件；其余工作区与暂存区干净 |
+| 远端同步 | 更新本文前，本地 `origin/main` 为 `11bc3bf`，代码 Commit 领先 1 / 落后 0；文档提交后若未 Push，预计领先 2 / 落后 0。未再次 Fetch |
+| 工作区 | P2-F2 代码提交后仅本文待更新；文档提交后的实际状态须重新检查 |
 
-- 最近三次已推送提交：`d537b2e` Collection 草稿/Guard 基础、`fdbe5f6` 商品列表筛选、`326d860` 后台侧栏统一 Guard。
-- 本文件尚未 Add/Commit/Push。后续对话必须以届时实际 HEAD、`git status` 和远端引用为准。
+- 已推送的相邻提交：`d537b2e` Collection 草稿/Guard 基础、`fdbe5f6` 商品列表筛选、`326d860` 后台侧栏统一 Guard、`11bc3bf` 初版交接文档。`1dd16e6` 为本地 P2-F2 代码提交。
+- 本次 P2-F2 代码和文档提交均不 Push。后续对话必须以届时实际 HEAD、`git status` 和远端引用为准。
 
 建议新会话的只读核对命令：
 
@@ -80,8 +81,8 @@ git rev-list --left-right --count origin/main...HEAD
 - 商品、类目和 Collection 编辑器目前为本地草稿/演示，不向数据库保存；Collection 详情明确显示 `LOCAL DEMO / NOT CONNECTED`。
 - Collection 草稿会话保留页内未保存状态；Owner 与身份复核控制访问，成员来源重新读取，候选商品可搜索并进行精确成员校验后 Proposed Add。
 - Collection 辅助 API Route 在后台授权边界内提供成员来源和精确成员校验；浏览器测试主要使用隔离夹具，未验证真实 Supabase 权限。
-- Guard 覆盖后台未保存草稿、浏览器历史、正式桌面侧栏、品牌链接、移动菜单和登出；登出失败可连续重试且每次有效尝试重新确认。
-- P1-F1/F2 登出保护与 P2-F1 正式侧栏迁移在本地定向审查/验证后提交；本次只核对代码状态，没有重新运行这些测试。
+- Guard 覆盖后台未保存草稿、浏览器历史、正式桌面侧栏、品牌链接、移动菜单、顶部 Admin/Products/Collections 面包屑和登出；登出失败可连续重试且每次有效尝试重新确认。
+- P1-F1/F2 登出保护、P2-F1 正式侧栏和 P2-F2 面包屑迁移均已通过本地定向验证及独立只读复审；P2-F2 的代码提交为 `1dd16e6`。
 
 Collection 草稿的关键入口：
 
@@ -94,19 +95,21 @@ Collection 草稿的关键入口：
 
 ## 4. 当前开发阶段
 
-- Sprint 2.6 已完成并推送：Collection 草稿会话/Owner、成员来源与身份复核、候选/Proposed Add、商品列表筛选、正式侧栏统一 Guard、登出失败重试。
-- 当前没有正在开发的业务代码变更；本文件是唯一未跟踪工作。
-- Sprint 2.6 尚余 P2：顶部面包屑仍通过 `confirmNavigation()` 使用原生 `window.confirm`，未迁入 `requestNavigation` 的统一弹窗。
+- Sprint 2.6 已完成：Collection 草稿会话/Owner、成员来源与身份复核、候选/Proposed Add、商品列表筛选、正式侧栏及顶部面包屑统一 Guard、登出失败重试；P2-F2 代码已本地提交，尚未 Push。
+- 当前没有正在开发的业务代码变更；本次仅更新交接文档。
+- Sprint 2.6 尚余 P2：`GuardedAdminLink` 行内链接与类目树本地切换仍通过 `confirmNavigation()` 使用原生 `window.confirm`。
 - 后台页面的 `READ ONLY · SPRINT 2.6` 和 Collection 的 `LOCAL DEMO` 标签与当前未持久化边界一致。
 - 生产接入是另一个阶段：管理员身份、目录只读角色/连接、RFQ 写入和导入链路均需独立环境核验与审批。
+- 真实 Supabase 集成、目标数据库迁移与生产环境验收均未完成确认；仓库中的适配器、SQL 和本地验证不能替代这些工作。
 
 已提交范围按任务边界分开：
 
 1. `d537b2e`：Collection 本地草稿与 Guard 基础。
 2. `fdbe5f6`：商品列表筛选及 URL 状态。
 3. `326d860`：正式侧栏/品牌/移动菜单的 Guard 入口与 cleanup。
+4. `1dd16e6`：顶部 Admin/Products/Collections 面包屑统一 Guard 及关联 E2E。
 
-三个提交共享部分后台文件；未来修复应检查具体 hunk，不能仅按路径判断任务归属。
+上述功能提交共享部分后台文件；未来修复应检查具体 hunk，不能仅按路径判断任务归属。
 
 ## 5. 未完成任务与风险
 
@@ -114,7 +117,7 @@ Collection 草稿的关键入口：
 | --- | --- | --- |
 | P0 | 本轮未发现新的已确认 P0；生产环境状态未验证，不能据此声明无生产风险 | 在批准的隔离/预生产环境进行目标识别、权限快照和部署检查 |
 | P1 | 本轮未发现新的已确认 P1；P1-F1/F2 仅有本地隔离夹具与定向浏览器验收 | 生产接入前重验真实身份撤销、会话与授权边界 |
-| P2 | 顶部面包屑仍使用原生确认；交互与侧栏/登出不一致 | 单独迁入统一 Guard，并审查取消、确认和历史导航 |
+| P2 | `GuardedAdminLink` 的返回商品/Collection、清除不支持参数及成员翻页链接仍使用原生确认；类目树本地切换也调用该确认。普通取消仍阻止操作，未发现绕过草稿保护 | 将行内导航与类目树行为分开设计、审查和定向验证 |
 | 生产接入 | Catalog 只读源默认关闭；真实 Supabase 项目、角色/ACL/RLS、TLS/pooler、迁移历史未验收 | 按 `docs/admin-catalog-supabase-snapshot-f2.md` 的审批门槛先做只读目标快照 |
 | 生产接入 | RFQ Route 生产关闭；Catalog 导入 receipt 草案及维护运行器未生产化 | 分别审查运行身份、数据库授权、迁移、监控和回滚 |
 | 内容上线 | Mock 价格、MOQ、能力和图片不得作为真实商品承诺 | 使用核实的供应商数据替换并复核索引策略 |
@@ -124,7 +127,8 @@ Collection 草稿的关键入口：
 - 最近三次分组提交前的本地定向记录：Collection 基础暂存快照 Typecheck 通过、82 个相关单元测试通过、10 个定向 Playwright 通过。
 - 商品筛选暂存快照 Typecheck/定向 ESLint 通过、5 个单元测试通过、11 个关联 Playwright 通过、1 个按视口跳过。
 - P2-F1 暂存快照 Typecheck、定向 ESLint、`git diff --check` 通过；8 个关联 Playwright 通过、2 个按视口跳过，含 P1 登出连续失败重试回归。
-- 这些结果来自提交前的本地验证记录，不是本次文档任务新运行的测试；本轮没有运行 Typecheck、Lint、单元测试或 Playwright。
+- P2-F2 独立只读复审：Typecheck、三个修改文件的定向 ESLint、`git diff --check` 通过；Admin 导航单元测试 3 PASS；关联 Playwright 18 PASS / 2 SKIP（按桌面/移动视口），含正式面包屑、历史、侧栏与登出回归。
+- 上述结果来自对应开发与复审任务；本次交接文档更新没有重新运行 Typecheck、Lint、单元测试或 Playwright。
 - GitHub 仓库当前未见 `.github` CI 工作流；不得把本地测试等同于云端 CI 或生产发布验收。
 - 未覆盖：真实 Supabase Auth、目标项目权限与迁移、生产 TLS/pooler、真实 RFQ 写入、生产导入/receipt、运行监控、真实客户/供应商数据。
 - 历史报告的测试数字和 Git 基线可能过期；执行新任务时以实际代码和新测试结果为准。
@@ -152,11 +156,11 @@ git diff --check
 
 ## 8. 下一步建议
 
-**建议下一项独立任务：Sprint 2.6 P2-F2 顶部面包屑导航统一 Guard。**
+**建议下一项独立任务：Sprint 2.6 P2-F3 行内 `GuardedAdminLink` 导航统一 Guard。**
 
-1. 先核对 `src/components/admin/admin-shell.tsx` 中三个面包屑入口与 `src/components/admin/admin-unsaved-changes.tsx` 的当前调用关系。
-2. 仅将面包屑接入现有 `requestNavigation`；不增加第二套确认状态，不改变已通过的侧栏、移动菜单或登出流程。
-3. 定向验收：有草稿取消后页面/草稿/身份不变；确认后只导航一次；无草稿可直接导航；浏览器前进/后退及登出失败重试无回归。
+1. 先核对 `src/components/admin/admin-unsaved-changes.tsx` 的 `GuardedAdminLink`，列出返回商品/Collection、参数恢复和成员翻页的正式入口。
+2. 仅将这些行内导航接入现有 `requestNavigation`；类目树切换是页内状态动作，应单独设计，不直接冒充路由导航。
+3. 定向验收：有草稿取消后页面/草稿/身份不变；确认后只导航一次；无草稿正常导航；URL 状态、浏览器历史、侧栏、面包屑与登出无回归。
 4. 运行 Typecheck、定向 ESLint、`git diff --check` 和必要的桌面/移动端 Playwright；随后独立只读复审。真实 Supabase 验证另立任务。
 
 生产接入前应先从批准的目标项目做只读身份和权限快照，确认环境、迁移与角色边界，再决定是否申请迁移或启用连接。本文不授权这些操作。

@@ -86,6 +86,8 @@
 .admin-candidate-filters button:disabled, .admin-candidate-panel .admin-product-pagination button:disabled { opacity: .55; cursor: default; }
 .admin-candidate-state { margin: 0; padding: 14px 24px; color: var(--admin-muted); font-size: 12px; overflow-wrap: anywhere; }
 .admin-candidate-panel td { overflow-wrap: anywhere; }
+.admin-candidate-panel td button { display: inline-flex; align-items: center; min-height: 39px; margin: 6px 6px 0 0; padding: 0 10px; border: 1px solid #45634d; border-radius: 7px; background: #45634d; color: white; font-size: 11px; font-weight: 700; }
+.admin-candidate-panel td button:disabled { opacity: .55; cursor: default; }
 @media (max-width: 900px) {
   .admin-candidate-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .admin-candidate-filters button { grid-row: auto; }
@@ -182,6 +184,18 @@
 .admin-mobile-close, .admin-menu-trigger { display: none; }
 .admin-mobile-dialog:not([open]) { display: none; }
 .admin-mobile-dialog { display: none; }
+.admin-guard-dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 26px; border: 1px solid var(--admin-line); border-radius: 14px; background: #fff; color: #202823; box-shadow: 0 18px 55px #111b1640; }
+.admin-guard-dialog::backdrop { background: #15221bc2; }
+.admin-guard-dialog h2 { margin: 0 0 12px; font-size: 20px; }
+.admin-guard-dialog p { margin: 0; line-height: 1.6; }
+.admin-guard-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.admin-guard-actions button { padding: 10px 14px; border: 1px solid #58705d; border-radius: 8px; background: #fff; color: #263f2d; cursor: pointer; }
+.admin-guard-actions button:last-child { background: #263f2d; color: #fff; }
+.admin-guard-actions button:focus-visible { outline: 3px solid #b56d2f; outline-offset: 2px; }
+.admin-guard-navigation-status, .admin-guard-resumed { position: fixed; right: 16px; bottom: 16px; z-index: 1100; width: min(420px, calc(100vw - 32px)); margin: 0; padding: 14px 16px; border: 1px solid #58705d; border-radius: 10px; background: #fff; color: #202823; box-shadow: 0 10px 35px #111b1633; }
+.admin-guard-navigation-status p { margin: 0 0 10px; }
+.admin-guard-navigation-status button { padding: 8px 12px; border: 1px solid #58705d; border-radius: 8px; background: #263f2d; color: #fff; cursor: pointer; }
+.admin-guard-navigation-status button:focus-visible { outline: 3px solid #b56d2f; outline-offset: 2px; }
 @media (max-width: 850px) {
   .admin-shell { display: block; }
   .admin-sidebar { display: none; }

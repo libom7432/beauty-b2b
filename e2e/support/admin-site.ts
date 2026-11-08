@@ -35,12 +35,40 @@ import type { AdminIdentity } from "../catalog-import/admin-auth.ts";
 export const getAdminUIIdentity = cache(async () => {
   const role = (await cookies()).get("admin-ui-fixture")?.value;
   if (!role) redirect("/admin/login");
-  return { admin_id: "11111111-1111-4111-8111-111111111111",
+  return { admin_id: role === "catalog-only" ? "22222222-2222-4222-8222-222222222222" :
+    "11111111-1111-4111-8111-111111111111",
     identity_provider: "fixture", provider_subject: "fixture-admin", status: "active",
     created_at: "2026-10-18T00:00:00Z", disabled_at: null,
     permissions: role === "editor" ? ["catalog.read", "catalog.import.receipt.read"] :
       role === "catalog-only" ? ["catalog.read"] : [] } as AdminIdentity;
 });
+export const readAdminUISession = cache(async () => {
+  const role = (await cookies()).get("admin-ui-fixture")?.value;
+  if (!role) return null;
+  const admin = await getAdminUIIdentity();
+  const session = (await cookies()).get("admin-ui-fixture-session")?.value || "first";
+  return { admin, sessionKey: (role === "catalog-only" ? "b" : "a").repeat(64)
+    .replace(/^./, session === "second" ? "c" : role === "catalog-only" ? "b" : "a") };
+});
+export const getAdminUISession = cache(async () => {
+  const value = await readAdminUISession();
+  if (!value) redirect("/admin/login");
+  return value;
+});
+`;
+
+const actionsFixture = `
+"use server";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+export async function loginAction(_form: FormData) { redirect("/admin/login?error=1"); }
+export async function logoutAction(_previousState: "failed" | null): Promise<"failed"> {
+  const store = await cookies();
+  if (store.get("admin-ui-fixture-logout")?.value !== "succeed") return "failed";
+  store.delete("admin-ui-fixture");
+  store.delete("admin-ui-fixture-session");
+  redirect("/admin/login");
+}
 `;
 
 const catalogFixture = `
@@ -215,11 +243,42 @@ export async function startAdminFixture() {
     symlinkSync(dependencies, join(fixtureRoot, "node_modules"), "dir");
     writeFileSync(join(fixtureRoot, "src/lib/admin/server-access.ts"), accessFixture);
     writeFileSync(join(fixtureRoot, "src/lib/admin/ui-identity.ts"), identityFixture);
+    writeFileSync(join(fixtureRoot, "src/app/admin/actions.ts"), actionsFixture);
     writeFileSync(join(fixtureRoot, "src/lib/catalog-read/server.ts"), catalogFixture);
+    // Only the temporary fixture copy exposes a sanitized Owner snapshot for
+    // failed timing tests on the real Collection detail route.
+    const shellPath = join(fixtureRoot, "src/components/admin/admin-shell.tsx");
+    const shellSource = readFileSync(shellPath, "utf8");
+    const shellMarker = "  const signOut = useCallback(() => {";
+    if (!shellSource.includes(shellMarker)) throw Error("Admin Shell fixture probe anchor changed");
+    const guardProbeFile = join(fixtureRoot, "src/components/admin/admin-guard-probe.tsx");
+    cpSync(join(repositoryRoot, "e2e/support/admin-guard-probe.tsx"), guardProbeFile);
+    const guardMarker = "</AdminCollectionDraftSessionProvider></AdminUnsavedChangesProvider>";
+    if (!shellSource.includes(guardMarker)) throw Error("Admin Guard fixture probe anchor changed");
+    writeFileSync(shellPath, shellSource.replace(
+      'import { LogoutForm } from "@/app/admin/logout-form";',
+      'import { LogoutForm } from "@/app/admin/logout-form";\nimport { AdminGuardProbe } from "./admin-guard-probe";')
+      .replace(guardMarker, `<AdminGuardProbe />${guardMarker}`)
+      .replace(shellMarker, `  useEffect(() => {
+    const target = window as Window & { verificationShellSnapshot?: () => object };
+    target.verificationShellSnapshot = () => {
+      const entry = Object.values(owner.getSnapshot().state.entries)
+        .find((item) => item.activeVisitKey !== null);
+      const epoch = owner.getAccessEpoch();
+      return { identityPhase: identity.phase, accessEpoch: epoch,
+        accessOpen: owner.isCurrentAccess(epoch), generation: entry?.generation ?? null,
+        sourceState: entry?.sourceState ?? null, visitActive: !!entry?.activeVisitKey };
+    };
+    return () => { delete target.verificationShellSnapshot; };
+  }, [owner, identity.phase]);
+
+${shellMarker}`));
     cpSync(join(repositoryRoot, "e2e/support/collections-fixture-source.ts"),
       join(fixtureRoot, "src/lib/catalog-read/collections-fixture-source.ts"));
     cpSync(join(repositoryRoot, "e2e/support/collection-membership-check-fixture-route.ts"),
       join(fixtureRoot, "src/app/api/admin/collections/[collectionId]/membership-check/route.ts"));
+    cpSync(join(repositoryRoot, "e2e/support/collection-member-source-fixture-route.ts"),
+      join(fixtureRoot, "src/app/api/admin/collections/[collectionId]/member-source/route.ts"));
     const categoryRefreshRoute = join(fixtureRoot, "src/app/admin/(workspace)/category-refresh-fixture");
     mkdirSync(categoryRefreshRoute, { recursive: true });
     cpSync(join(repositoryRoot, "e2e/support/category-refresh-page.tsx"), join(categoryRefreshRoute, "page.tsx"));

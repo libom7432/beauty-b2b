@@ -1,7 +1,7 @@
 "use client";
 
-import { useTransition, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CandidateQuery, CandidateResult } from "@/lib/admin/collection-candidate-search";
 import type { UrlEntry } from "@/lib/admin/collection-detail-query";
 import type { CandidateLocalMembershipStatus } from "@/lib/admin/collection-candidate-membership-status";
@@ -33,9 +33,35 @@ const verificationCopy: Record<AdminCollectionMembershipCheckResult["status"], s
   INCOMPLETE: "Verification Incomplete",
 };
 
-export function CollectionCandidateSearch({ collectionId, memberUrlEntries, query, result, testData,
+type NavigationAttempt = Readonly<{
+  id: number; origin: string; target: string; search: string;
+  status: CandidateQuery["status"]; phase: "PENDING" | "SUPERSEDED" | "RECOVERABLE";
+}>;
+
+// URLSearchParams normalizes percent encoding; sorting distinct keys ignores harmless
+// parameter ordering while preserving the order of repeated values for each key.
+function comparableUrl(href: string): string {
+  const url = new URL(href, window.location.origin);
+  const grouped = new Map<string, string[]>();
+  for (const [key, value] of url.searchParams) grouped.set(key, [...(grouped.get(key) ?? []), value]);
+  const params = new URLSearchParams();
+  for (const key of [...grouped.keys()].sort()) {
+    for (const value of grouped.get(key) ?? []) params.append(key, value);
+  }
+  return `${url.pathname}${params.size ? `?${params}` : ""}`;
+}
+
+function targetQueryMatches(target: string, query: CandidateQuery): boolean {
+  const params = new URL(target, window.location.origin).searchParams;
+  return query.search === (params.get("candidate_q") ?? "") &&
+    query.status === (params.get("candidate_status") ?? "all") &&
+    query.cursor === params.get("candidate_cursor") &&
+    query.direction === (params.get("candidate_direction") ?? "after");
+}
+
+export function CollectionCandidateSearch({ collectionId, query, result, testData,
   hasCandidateCursor, urlPaused = false, membershipStatuses, verification, canVerify,
-  onVerify, onInvalidateVerification,
+  onVerify, onAdd, onInvalidateVerification, actionFeedback,
   nextHref, previousHref, firstHref }: {
   collectionId: string; memberUrlEntries: readonly UrlEntry[]; query: CandidateQuery;
   hasCandidateCursor: boolean;
@@ -45,18 +71,107 @@ export function CollectionCandidateSearch({ collectionId, memberUrlEntries, quer
   verification: CandidateVerificationDisplay | null;
   canVerify: boolean;
   onVerify: (productId: string) => void;
+  onAdd: (productId: string) => void;
   onInvalidateVerification: () => void;
+  actionFeedback: string | null;
   nextHref: string | null; previousHref: string | null; firstHref: string;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const navigate = (href: string) => { onInvalidateVerification(); startTransition(() => router.push(href)); };
-  const hrefFor = (nextSearch: string, nextStatus: CandidateQuery["status"]) => {
-    const params = new URLSearchParams();
-    for (const [key, value] of memberUrlEntries) {
-      if (key !== "candidate_q" && key !== "candidate_status" &&
-        key !== "candidate_cursor" && key !== "candidate_direction") params.append(key, value);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const locationKey = `${pathname}${searchParams.size ? `?${searchParams}` : ""}`;
+  const { search: querySearch, status: queryStatus, cursor: queryCursor,
+    direction: queryDirection } = query;
+  const [transitionPending, startTransition] = useTransition();
+  const [attempt, setAttempt] = useState<NavigationAttempt | null>(null);
+  const attemptRef = useRef<NavigationAttempt | null>(null);
+  const abandonedTargetRef = useRef<string | null>(null);
+  const [navigationNotice, setNavigationNotice] = useState<"LATE" | "PRESERVED" | null>(null);
+  const nextAttemptId = useRef(0);
+  const sawTransitionPending = useRef<number | null>(null);
+  const [searchInput, setSearchInput] = useState(query.search);
+  const [statusInput, setStatusInput] = useState<CandidateQuery["status"]>(query.status);
+  const editableRef = useRef({ search: query.search, status: query.status });
+  const committedRef = useRef({ search: query.search, status: query.status });
+  const searchRef = useRef<HTMLInputElement>(null);
+  const focusAfterResume = useRef(false);
+  const setEditable = (search: string, status: CandidateQuery["status"]) => {
+    editableRef.current = { search, status };
+    setSearchInput(search);
+    setStatusInput(status);
+    if (search === committedRef.current.search && status === committedRef.current.status)
+      setNavigationNotice(null);
+  };
+  const publishAttempt = (next: NavigationAttempt | null) => {
+    attemptRef.current = next;
+    setAttempt(next);
+  };
+  useEffect(() => {
+    const current = attemptRef.current;
+    if (current && comparableUrl(locationKey) === current.target && targetQueryMatches(current.target,
+      { search: querySearch, status: queryStatus, cursor: queryCursor, direction: queryDirection })) {
+      publishAttempt(null);
+      abandonedTargetRef.current = null;
+      committedRef.current = { search: querySearch, status: queryStatus };
+      setEditable(current.search, current.status);
+      setNavigationNotice(current.search !== querySearch || current.status !== queryStatus
+        ? "PRESERVED" : null);
+    } else if (current && comparableUrl(locationKey) !== current.origin && current.phase === "PENDING") {
+      publishAttempt({ ...current, phase: "SUPERSEDED" });
+    } else if (!current) {
+      const previous = committedRef.current;
+      const editable = editableRef.current;
+      const hasUnsubmittedInput = editable.search !== previous.search || editable.status !== previous.status;
+      committedRef.current = { search: querySearch, status: queryStatus };
+      if (abandonedTargetRef.current === comparableUrl(locationKey)) {
+        abandonedTargetRef.current = null;
+        setNavigationNotice("LATE");
+      } else if (hasUnsubmittedInput &&
+        (editable.search !== querySearch || editable.status !== queryStatus)) {
+        abandonedTargetRef.current = null;
+        setNavigationNotice("PRESERVED");
+      } else {
+        abandonedTargetRef.current = null;
+        setNavigationNotice(null);
+        setEditable(querySearch, queryStatus);
+      }
     }
+  }, [locationKey, querySearch, queryStatus, queryCursor, queryDirection]);
+  useEffect(() => {
+    if (!attempt && focusAfterResume.current) {
+      focusAfterResume.current = false;
+      searchRef.current?.focus();
+    }
+  }, [attempt]);
+  useEffect(() => {
+    const current = attemptRef.current;
+    if (!current) return;
+    if (transitionPending) sawTransitionPending.current = current.id;
+    else if (sawTransitionPending.current === current.id && current.phase === "PENDING")
+      publishAttempt({ ...current, phase: "RECOVERABLE" });
+  }, [transitionPending, attempt]);
+  const pending = attempt !== null;
+  const showNavigationNotice = navigationNotice !== null &&
+    (searchInput !== querySearch || statusInput !== queryStatus);
+  const navigate = (href: string, nextSearch = editableRef.current.search,
+    nextStatus = editableRef.current.status) => {
+    if (attemptRef.current !== null) return;
+    const origin = comparableUrl(window.location.href);
+    const target = comparableUrl(href);
+    onInvalidateVerification();
+    if (target === origin) return;
+    const next: NavigationAttempt = { id: ++nextAttemptId.current, origin, target,
+      search: nextSearch, status: nextStatus, phase: "PENDING" };
+    sawTransitionPending.current = null;
+    setNavigationNotice(null);
+    publishAttempt(next);
+    try { startTransition(() => router.push(href)); }
+    catch { publishAttempt({ ...next, phase: "RECOVERABLE" }); }
+  };
+  const hrefFor = (nextSearch: string, nextStatus: CandidateQuery["status"]) => {
+    const params = new URLSearchParams(window.location.search);
+    for (const key of ["candidate_q", "candidate_status", "candidate_cursor", "candidate_direction"])
+      params.delete(key);
     if (nextSearch.trim()) params.set("candidate_q", nextSearch.trim());
     if (nextStatus !== "all") params.set("candidate_status", nextStatus);
     const suffix = params.toString();
@@ -64,11 +179,23 @@ export function CollectionCandidateSearch({ collectionId, memberUrlEntries, quer
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    navigate(hrefFor(String(values.get("candidate_q") ?? ""),
-      String(values.get("candidate_status") ?? "all") as CandidateQuery["status"]));
+    const { search, status } = editableRef.current;
+    navigate(hrefFor(search, status), search.trim(), status);
   };
-  const clear = () => navigate(hrefFor("", "all"));
+  const clear = () => {
+    if (attemptRef.current !== null) return;
+    const href = hrefFor("", "all");
+    if (comparableUrl(href) === comparableUrl(window.location.href)) {
+      onInvalidateVerification();
+      setEditable("", "all");
+      setNavigationNotice(null);
+    } else navigate(href, "", "all");
+  };
+  const resumeEditing = () => {
+    abandonedTargetRef.current = attemptRef.current?.target ?? null;
+    focusAfterResume.current = true;
+    publishAttempt(null);
+  };
   const displayState = urlPaused && result.state === "INCOMPLETE" ? "URL_PAUSED" : result.state;
   const rows = displayState === "RESULTS" ? result.items : [];
   return <section className="admin-card admin-table-panel admin-candidate-panel" aria-label="Candidate product search">
@@ -76,22 +203,40 @@ export function CollectionCandidateSearch({ collectionId, memberUrlEntries, quer
       <p>Read-only search. Local membership labels reflect loaded draft facts only. This page cannot prove that a product is not already associated with this Collection.</p>
     </div><div className="admin-table-badges">{testData && <AdminBadge tone="warning">TEST DATA / LOCAL DEMO</AdminBadge>}
       <AdminBadge>{displayState}</AdminBadge></div></div>
-    <form key={`${query.search}:${query.status}`} className="admin-candidate-filters" role="search" onSubmit={submit}>
+    <form className="admin-candidate-filters" role="search"
+      data-navigation-attempt={attempt?.id ?? ""} data-navigation-phase={attempt?.phase ?? "IDLE"}
+      aria-busy={pending} onSubmit={submit}>
       <label htmlFor="candidate-search">Search code or English / Chinese name</label>
-      <input id="candidate-search" name="candidate_q" type="search" maxLength={100} defaultValue={query.search} />
+      <input id="candidate-search" name="candidate_q" type="search" maxLength={100}
+        ref={searchRef} value={searchInput}
+        onChange={(event) => setEditable(event.target.value, editableRef.current.status)} disabled={pending} />
       <label htmlFor="candidate-status">Product status</label>
-      <select id="candidate-status" name="candidate_status" defaultValue={query.status}>
+      <select id="candidate-status" name="candidate_status" value={statusInput}
+        onChange={(event) => setEditable(editableRef.current.search,
+          event.target.value as CandidateQuery["status"])} disabled={pending}>
         <option value="all">All</option><option value="draft">Draft</option>
         <option value="published">Published</option><option value="retired">Retired</option>
       </select>
       <button type="submit" disabled={pending}>Search candidates</button>
       <button type="button" disabled={pending} onClick={clear}>Clear candidate filters</button>
+      {pending && <button type="button" onClick={resumeEditing}>Resume editing this search</button>}
     </form>
+    {showNavigationNotice && <p className="admin-candidate-state" role="alert">
+      {navigationNotice === "LATE" ?
+        "An earlier candidate page finished after editing resumed. Your unsubmitted search is preserved; review the URL before submitting." :
+        "Results reflect your last submitted search. Your current edits have not been applied. Review the URL before submitting."}
+    </p>}
     <p className="admin-candidate-state" role={displayState === "ERROR" || displayState === "INCOMPLETE" ||
       displayState === "INVALID_CURSOR" || displayState === "INVALID_QUERY" || displayState === "URL_PAUSED" ? "alert" : "status"}>
-      {pending ? "Loading candidate page…" : displayState === "URL_PAUSED" ? urlPausedCopy : stateCopy[result.state]}
+      {pending ? attempt?.phase === "SUPERSEDED" ?
+        "Another page navigation took precedence. Resume editing to submit this search again." :
+        attempt?.phase === "RECOVERABLE" ?
+          "Candidate navigation did not commit. Resume editing to retry; the earlier request may still finish." :
+          "Loading candidate page… Search controls are unavailable until navigation completes. Resume editing is available if navigation stalls; the request may still finish." :
+        displayState === "URL_PAUSED" ? urlPausedCopy : stateCopy[result.state]}
       {query.search && ` · Search: ${query.search}`}{query.status !== "all" && ` · Status: ${query.status}`}
     </p>
+    {actionFeedback && <p className="admin-candidate-state" role="alert">{actionFeedback}</p>}
     {rows.length > 0 && <AdminTable caption="Candidate products on current query page"
       headings={["Product UUID", "Product Code", "Display name", "Status", "Local membership", "Exact GET verification"]}>
       {rows.map((item) => {
@@ -111,7 +256,11 @@ export function CollectionCandidateSearch({ collectionId, memberUrlEntries, quer
                   membership === "NOT_VERIFIED" ? "Not Verified" : "Local draft fact; exact check unavailable"}
         </span>{membership === "NOT_VERIFIED" && canVerify &&
           <button type="button" disabled={pending || current?.phase === "VERIFYING"}
-            onClick={() => onVerify(item.productId)}>Verify Membership</button>}</td>
+            onClick={() => onVerify(item.productId)}>Verify Membership</button>}
+          {membership === "NOT_VERIFIED" && canVerify && current?.phase === "RESULT" &&
+            current.status === "NOT_MEMBER" &&
+            <button type="button" disabled={pending} onClick={() => onAdd(item.productId)}>
+              Add to Draft</button>}</td>
       </tr>; })}
     </AdminTable>}
     <nav className="admin-product-pagination" aria-label="Candidate product pages">

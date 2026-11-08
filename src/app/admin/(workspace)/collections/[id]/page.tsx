@@ -74,7 +74,7 @@ export default async function AdminCollectionDetailPage({ params, searchParams }
   const candidateHrefFor = (cursor: string | null, direction: "after" | "before" = "after") =>
     candidateHref(id, memberQuery, { ...candidateQuery, cursor, direction }, rawMemberEntries);
   return <><AdminPageHeader eyebrow="CATALOG / COLLECTIONS / DETAIL" title="Collection detail"
-    description="Read-only collection details with LOCAL DEMO drafts for basic information and associated products. Changes stay in browser memory, are never saved to the database, and are lost on refresh or departure.">
+    description="Read-only collection details with LOCAL DEMO drafts. Basic and membership changes stay in this tab across Admin navigation. Refresh clears both. Nothing is saved to the database.">
     <AdminBadge>{detail.state === "COMPLETE" ? "LOCAL DEMO / NOT CONNECTED" : detail.state === "NOT_CONNECTED" ? "Not Connected" : detail.state}</AdminBadge>
   </AdminPageHeader>
     <p className="mb-5"><GuardedAdminLink href="/admin/collections" className="admin-inline-link">← Back to Collections</GuardedAdminLink></p>

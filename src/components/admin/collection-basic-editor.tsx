@@ -1,49 +1,67 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AdminCollectionDetailResult } from "@/lib/catalog-read/types";
-import { canEditCollectionSlug, collectionBasicFingerprint, collectionBasicSourceChanged,
-  createCollectionBasicSelection, validateCollectionBasicDraft,
-  type CollectionBasicDraft, type CollectionBasicSelection } from "@/lib/admin/collection-basic-editor-draft";
+import { canEditCollectionSlug, validateCollectionBasicDraft,
+  type CollectionBasicDraft } from "@/lib/admin/collection-basic-editor-draft";
+import type { CollectionDraftSessionCode } from
+  "@/lib/admin/collection-draft-session";
+import { sessionBasicDirty, useAdminCollectionDraftSessions } from "./admin-collection-draft-sessions";
 
-export function CollectionBasicEditor({ detail, onDirtyChange }: {
-  detail: AdminCollectionDetailResult; onDirtyChange: (dirty: boolean) => void;
+export function CollectionBasicEditor({ collectionId, detail, visitKey }: {
+  collectionId: string; detail: AdminCollectionDetailResult; visitKey: string | null;
 }) {
+  const { state, capacityErrors, editBasic, discardBasic, identityVerified } =
+    useAdminCollectionDraftSessions();
   const current = detail.state === "COMPLETE" ? detail.item : null;
-  const [stored, setStored] = useState<CollectionBasicSelection | null>(() => current
-    ? createCollectionBasicSelection(current) : null);
   const [editing, setEditing] = useState(false);
   const [checked, setChecked] = useState(false);
-  const storedDirty = !!stored && collectionBasicFingerprint(stored.draft) !==
-    collectionBasicFingerprint(stored.originalDraft);
-  // A clean draft follows a newly supplied trusted snapshot. A dirty draft keeps its own base.
-  const selection = !storedDirty && current && (!stored || collectionBasicSourceChanged(stored.original, current))
-    ? createCollectionBasicSelection(current) : stored;
-  const dirty = !!selection && collectionBasicFingerprint(selection.draft) !==
-    collectionBasicFingerprint(selection.originalDraft);
-  const sourceChanged = !!selection && collectionBasicSourceChanged(selection.original, current);
-  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
-  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const entry = state.entries[collectionId.toLowerCase()];
+  const selection = entry?.basic ?? null;
+  const dirty = sessionBasicDirty(state, collectionId);
+  const sourceChanged = !!selection && (!entry?.latestBasicSource || entry.basicSourceChanged);
 
-  if (!selection || !current && !dirty) return null;
+  const feedbackFor = (code: CollectionDraftSessionCode): string | null => {
+    if (code === "PAYLOAD_LIMIT") return "Session space is insufficient for this change. Your earlier draft is unchanged.";
+    if (code === "DIRTY_COLLECTION_LIMIT") return "Only three Collections may have unsaved drafts. Your earlier draft is unchanged.";
+    if (code === "SOURCE_NOT_READY" || code === "STALE_GENERATION")
+      return "This source needs a fresh read before editing. Your earlier draft is unchanged.";
+    if (code === "ACTION_REJECTED") return "This change could not be applied. Your earlier draft is unchanged.";
+    return null;
+  };
+
+  const capacityError = capacityErrors[collectionId.toLowerCase()];
+  const capacityMessage = capacityError === "DIRTY_COLLECTION_LIMIT"
+    ? "Only three Collections may have unsaved drafts. Your earlier draft is unchanged."
+    : "Session space is insufficient for this change. Your earlier draft is unchanged.";
+  if (!identityVerified || !visitKey) return null;
+  if (!selection || !current && !dirty) return feedback || capacityError
+    ? <section className="admin-card admin-editor" role="region" aria-label="Local collection basic editor">
+      <p role="alert">{feedback || capacityMessage}</p></section> : null;
   const { original, draft } = selection;
   const retired = original.status === "retired";
   const controlsDisabled = sourceChanged || retired;
   const validation = checked && !sourceChanged ? validateCollectionBasicDraft(original, draft) : null;
   const update = <K extends keyof CollectionBasicDraft>(field: K, value: CollectionBasicDraft[K]) => {
-    setStored({ ...selection, draft: { ...draft, [field]: value } });
-    setChecked(false);
+    const code = editBasic(collectionId, visitKey, field, value);
+    setFeedback(feedbackFor(code));
+    if (code === "APPLIED" || code === "UNCHANGED") setChecked(false);
   };
   const discard = () => {
-    setStored(current ? createCollectionBasicSelection(current) : null);
-    setChecked(false);
-    setEditing(false);
+    const result = discardBasic(collectionId, visitKey);
+    setFeedback(feedbackFor(result.code));
+    if (result.code === "APPLIED" || result.code === "UNCHANGED") {
+      setChecked(false);
+      setEditing(false);
+    }
   };
   return <section className="admin-card admin-editor" role="region" aria-label="Local collection basic editor">
     <div className="admin-editor-heading"><div><h2>Local collection basic draft</h2>
-      <p className="admin-editor-warning">LOCAL DEMO / NOT CONNECTED · Changes exist only in this tab and will be lost on refresh or departure. Nothing is saved to the server.</p>
+      <p className="admin-editor-warning">LOCAL DEMO / NOT CONNECTED · This Basic draft stays in this tab during Admin navigation. Refresh, sign-out or closing the tab clears it. Nothing is saved to the server.</p>
     </div><span className="admin-badge admin-badge-warning">No database save</span></div>
     {sourceChanged && <p role="alert">Source data has changed or is unavailable. This draft is based on an earlier read. Check draft is paused. Discard changes to load the current trusted data.</p>}
+    {(feedback || capacityError) && <p role="alert">{feedback || capacityMessage}</p>}
     <p role="status">{dirty ? "Unsaved local changes" : "No local changes"}</p>
     {!editing && !retired && !sourceChanged && <button type="button" onClick={() => setEditing(true)}>Edit local draft</button>}
     {retired && <p>Retired is terminal. All fields are read only.</p>}

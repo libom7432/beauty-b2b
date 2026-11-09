@@ -1,9 +1,11 @@
 # Beauty B2B 项目交接入口
 
-更新时间：2026-11-08（Asia/Shanghai）
-对应最新代码 Commit：`1dd16e67e7008c29441656d6651a5aa4d3893ea5`（P2-F2；本文档自身的提交 Hash 与此不同）
+更新时间：2026-11-09（Asia/Shanghai；Sprint 2.7 A5-F5 状态追加）
+Sprint 2.6 交接成稿时的代码 Commit：`1dd16e67e7008c29441656d6651a5aa4d3893ea5`（P2-F2；本文档自身的提交 Hash 与此不同）
 
 > 新对话先重新核对 Git 状态、代码和环境。本文基于上述代码 Commit 更新；文档提交 Hash 请用 `git log -1 -- docs/PROJECT_HANDOFF.md` 查询，编写时尚未生成。历史阶段文档中的“计划”“本地通过”不等于当前生产验收。
+
+> 2026-11-09 追加的 Sprint 2.7 状态见第 9 节。第 2、4、8 节的 Git 快照、阶段与下一步建议保留 Sprint 2.6 成稿时的历史语境；本轮核对的 `main` HEAD 为 `c496faf1f3c94156288a5debf6d6bf0ff8768e69`，暂存区为空。本轮不 Fetch、不 Push。
 
 ## 1. 项目概况
 
@@ -164,3 +166,14 @@ git diff --check
 4. 运行 Typecheck、定向 ESLint、`git diff --check` 和必要的桌面/移动端 Playwright；随后独立只读复审。真实 Supabase 验证另立任务。
 
 生产接入前应先从批准的目标项目做只读身份和权限快照，确认环境、迁移与角色边界，再决定是否申请迁移或启用连接。本文不授权这些操作。
+
+## 9. Sprint 2.7 — Supabase Integration Foundation（2026-11-09 状态追加）
+
+- 当前处理 A5-F5 证据签署与阶段交接；Sprint 2.6 已完成记录及其历史测试结论保留在上文。本节不声明 Sprint 2.7 或 A5 整体 PASS。
+- 目标开发项目为 `beauty-b2b-catalog-dev`（Ref `nnmdcezigmguqolbxzmb`）。A5-F3 已取得十份 Supabase 权限取证 CSV：A4-6 至 A4-9 四份、A5-F1-1 至 A5-F1-6 六份；本地文件的 SHA-256、数据行数、字段数已核对。完整文件位于受限取证位置，不进入公开 Git；逐项登记见 `docs/catalog-a5-evidence-provenance.md`。
+- A5-F4 已对 30 个角色、24 条成员关系以及数据库、Schema、默认 ACL 和有效权限完成离线分析与审批准备；逐项正式批准尚未完成。完整矩阵见 A5-F4 综合权限审查报告，阶段签署摘要见 `docs/catalog-a5-signoff.md`。
+- A4-9 的规范 SQL SHA-256 已按 `WITH` 至分号、去除首尾空白、不含标题注释的口径修正为 `e915c936eaff1356335fe298cdcd4cf049bb854c51caa11cf7e2d35f462e3b91`；旧值 `7e2a1c7332293527baa100607640f69db079f55caacd39de378ebf106521a6ae` 因多含 77 字节标题注释与 LF 保留供追溯。SQL 正文未因该修正改变。
+- 分层状态：`EVIDENCE_COLLECTED`（十份 CSV 的本地字节及结构核验完成）；`PROVENANCE_PENDING`（项目 Ref 现场证明、逐次执行身份／UTC 时间／成功日志、SQL 与 CSV 绑定及人工签署待补）；`BASELINE_NOT_APPROVED`（30 角色、24 关系及高权限路径尚待正式结论）；`A6_BLOCKED`（未获准进入正式快照）。这些是阶段管理记录，不表示数据库权限变化。
+- 已提供的身份检查截图在当前 Codex 环境中无法读取，故截图声称的身份、版本和时间未升级为现场已核实证据。CSV 可证明其自身记录的当前数据库及所有者为 `postgres`；不证明各次查询的 SQL Editor 身份或执行时间。
+- 下一步由项目负责人组织：提供可核验的项目／身份现场材料和逐次执行记录，绑定十条 SQL 与对应 CSV；由采集者及独立复核者签署；对 30 角色、24 关系、`PUBLIC TEMPORARY` 与高权限 SET ROLE 路径作可追溯审批；正式选定审计执行身份方案。若选择既有受控身份，须另行批准与现行 A6 专用审计身份契约及检查器条件的差异。
+- A6 尚未授权；审计角色创建、GRANT／REVOKE、RLS 变更、迁移、连接凭据与正式数据库操作均需单独授权。本次只更新文档，不执行 Git Add、Commit 或 Push。

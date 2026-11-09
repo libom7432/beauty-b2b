@@ -13,9 +13,33 @@ const nonempty = (value) => typeof value === "string" && value.trim() === value 
 const projectRef = (value) => typeof value === "string" && /^[a-z0-9]{20}$/.test(value);
 const queryIds = new Set(["snapshot", "migration-history"]);
 const stages = new Set(["empty", "foundation", "admin-read"]);
+const snapshotSections = new Set(["database","business_inventory","permission_inventory",
+  "business_object","migration_registry","schema","relation","policy","role","membership",
+  "database_acl","schema_acl","relation_acl","default_acl","function","function_acl",
+  "function_effective","rfq_function_effective","effective_database","effective_schema",
+  "effective_relation"]);
+const requiredSnapshotSections = ["database","business_inventory","permission_inventory",
+  "migration_registry","schema","role","database_acl","schema_acl",
+  "effective_database","effective_schema"];
+const foundationSections = ["business_object","relation","policy","relation_acl",
+  "function","function_acl","function_effective","effective_relation"];
 const utcInstant = (value) => typeof value === "string" &&
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
   !Number.isNaN(Date.parse(value)) && new Date(value).toISOString() === value;
+
+// Compare the complete server_version value, including any build suffix, byte for byte.
+// A different suffix or patch version needs a separately hashed approval policy.
+function databaseIdentity(value, source, add) {
+  if (value === undefined || value === null) {
+    add("DATABASE_IDENTITY_MISSING", source);
+    return false;
+  }
+  if (!nonempty(value)) {
+    add("DATABASE_IDENTITY_INVALID", source);
+    return false;
+  }
+  return true;
+}
 
 const sameFile = (a,b) => a.dev === b.dev && a.ino === b.ino;
 const sameVersion = (a,b) => sameFile(a,b) && a.size === b.size &&
@@ -110,12 +134,70 @@ async function inventoryEvidenceDirectory(root, directory, expected, add) {
   return results;
 }
 
+class DuplicateJsonKeyError extends Error {
+  constructor() { super("duplicate JSON object key"); }
+}
+
+// JSON.parse validates syntax; this second pass tracks decoded keys before any
+// object can be accepted. Its grammar walk ignores strings and enters nested objects.
+function parseUniqueJson(bytes) {
+  const content = bytes.toString("utf8");
+  if (Buffer.from(content,"utf8").compare(bytes) !== 0) throw new Error("invalid UTF-8");
+  const parsed = JSON.parse(content);
+  let offset = 0;
+  const whitespace = () => {
+    while (/[\t\n\r ]/.test(content[offset] ?? "")) offset++;
+  };
+  const string = () => {
+    const start = offset++;
+    while (offset < content.length) {
+      const character = content[offset++];
+      if (character === "\\") offset++;
+      else if (character === '"') return JSON.parse(content.slice(start,offset));
+    }
+    throw new Error("unterminated JSON string");
+  };
+  const value = () => {
+    whitespace();
+    if (content[offset] === "{") {
+      offset++; whitespace();
+      const keys = new Set();
+      if (content[offset] === "}") { offset++; return; }
+      while (true) {
+        const key = string();
+        if (keys.has(key)) throw new DuplicateJsonKeyError();
+        keys.add(key);
+        whitespace(); offset++; // colon; the first JSON.parse validated punctuation.
+        value(); whitespace();
+        if (content[offset] === "}") { offset++; return; }
+        offset++; whitespace(); // comma
+      }
+    }
+    if (content[offset] === "[") {
+      offset++; whitespace();
+      if (content[offset] === "]") { offset++; return; }
+      while (true) {
+        value(); whitespace();
+        if (content[offset] === "]") { offset++; return; }
+        offset++; // comma
+      }
+    }
+    if (content[offset] === '"') { string(); return; }
+    while (offset < content.length && !/[,}\]\t\n\r ]/.test(content[offset])) offset++;
+  };
+  value(); whitespace();
+  if (offset !== content.length) throw new Error("incomplete JSON scan");
+  return parsed;
+}
+
 function parseJsonLines(bytes) {
   const content = bytes.toString("utf8");
   if (Buffer.from(content,"utf8").compare(bytes) !== 0) throw new Error("invalid UTF-8");
-  const lines = content.split(/\r?\n/).filter((line) => line.length > 0);
-  if (!lines.length) throw new Error("empty snapshot export");
-  return lines.map((line) => JSON.parse(line));
+  const lines = content.split(/\r?\n/);
+  if (lines.at(-1) === "") lines.pop(); // One terminal line ending is allowed.
+  if (!lines.length || lines.some((line) => line.length === 0))
+    throw new Error("empty snapshot line or export");
+  return lines.map((line) => parseUniqueJson(Buffer.from(line,"utf8")));
 }
 
 function parseVersions(bytes) {
@@ -124,7 +206,7 @@ function parseVersions(bytes) {
   return content.split(/\r?\n/).filter((line) => line.length > 0);
 }
 
-function snapshotStructureFindings(rows) {
+function snapshotStructureFindings(rows, stage) {
   const findings = [];
   if (rows.some((row) => !row || typeof row.section !== "string" ||
       typeof row.item !== "string" || !row.data || typeof row.data !== "object" ||
@@ -135,13 +217,27 @@ function snapshotStructureFindings(rows) {
   const keys = rows.map((row) => `${row.section}\u0000${row.item}`);
   if (new Set(keys).size !== keys.length)
     findings.push(blocked("SNAPSHOT_DUPLICATE_ROW", "duplicate section/item"));
+  const count = (section) => rows.filter((row) => row.section === section).length;
+  for (const row of rows) if (!snapshotSections.has(row.section))
+    findings.push(blocked("SNAPSHOT_UNKNOWN_SECTION", row.section));
+  for (const section of [...requiredSnapshotSections,
+    ...(stage === "foundation" || stage === "admin-read" ? foundationSections : [])]) {
+    if (count(section) === 0)
+      findings.push(blocked("SNAPSHOT_REQUIRED_SECTION_EMPTY", section));
+  }
+  for (const [section,item] of [["business_inventory","catalog-rfq-admin-prefixes"],
+    ["migration_registry","supabase_migrations.schema_migrations"]]) {
+    if (count(section) !== 1 || !rows.some((row) => row.section === section && row.item === item))
+      findings.push(blocked("SNAPSHOT_REQUIRED_SECTION_MISSING", section));
+  }
+  if (!rows.some((row) => row.section === "schema_acl" && row.data.schema === "public"))
+    findings.push(blocked("SNAPSHOT_REQUIRED_SECTION_MISSING", "public schema ACL"));
   const inventory = rows.filter((row) => row.section === "permission_inventory" &&
     row.item === "database-acl-and-membership");
   if (inventory.length !== 1 || inventory[0].data.complete !== true) {
     findings.push(blocked("SNAPSHOT_INVENTORY_MISSING", "one complete permission inventory required"));
     return findings;
   }
-  const count = (section) => rows.filter((row) => row.section === section).length;
   const expected = {
     snapshot_row_count:rows.length, role_count:count("role"),
     membership_count:count("membership"), database_acl_count:count("database_acl"),
@@ -187,16 +283,18 @@ export async function validateOfflineBundle(bundleDirectory, policyFile, expecte
       path.basename(policyFile));
     if (sha256(policyBytes) !== expectedPolicySha256)
       add("POLICY_HASH_MISMATCH", "policy bytes differ from the independent approval anchor");
-    policy = JSON.parse(policyBytes.toString("utf8"));
-  } catch {
-    add("POLICY_UNAVAILABLE", "separate policy file cannot be read");
+    policy = parseUniqueJson(policyBytes);
+  } catch (error) {
+    add(error instanceof DuplicateJsonKeyError ? "DUPLICATE_JSON_KEY" : "POLICY_UNAVAILABLE",
+      "separate policy file cannot be read or parsed");
   }
 
   let manifest;
   if (root) try {
-    manifest = JSON.parse((await readStableBundleFile(root,"manifest.json")).toString("utf8"));
-  } catch {
-    add("MANIFEST_UNAVAILABLE", "manifest.json cannot be read");
+    manifest = parseUniqueJson(await readStableBundleFile(root,"manifest.json"));
+  } catch (error) {
+    add(error instanceof DuplicateJsonKeyError ? "DUPLICATE_JSON_KEY" : "MANIFEST_UNAVAILABLE",
+      "manifest.json cannot be read or parsed");
   }
 
   if (!policy || policy.kind !== "CATALOG_A6_OFFLINE_POLICY_V1" ||
@@ -210,6 +308,8 @@ export async function validateOfflineBundle(bundleDirectory, policyFile, expecte
       !policy.sqlSha256 || !hex256(policy.sqlSha256.snapshot) ||
       !hex256(policy.sqlSha256["migration-history"]))
     add("INVALID_POLICY", "offline policy fields or hashes are invalid");
+  const policyDatabaseValid = databaseIdentity(policy?.database_name,"policy.database_name",add);
+  const policyVersionValid = databaseIdentity(policy?.postgres_version,"policy.postgres_version",add);
   if (!manifest || manifest.kind !== "CATALOG_A6_OFFLINE_BUNDLE_V1" ||
       !projectRef(manifest.projectRef) || !stages.has(manifest.stage) ||
       !["absent","present"].includes(manifest.adminIdentity) ||
@@ -275,8 +375,9 @@ export async function validateOfflineBundle(bundleDirectory, policyFile, expecte
       catch { add("APPROVED_SQL_MISSING", id); }
       try { recordBytes = recordFiles.get(entry.executionRecordFile);
         if (!recordBytes) throw new Error("unavailable record");
-        record = JSON.parse(recordBytes.toString("utf8")); }
-      catch { add("EXECUTION_RECORD_MISSING", id); }
+        record = parseUniqueJson(recordBytes); }
+      catch (error) { add(error instanceof DuplicateJsonKeyError
+        ? "DUPLICATE_JSON_KEY" : "EXECUTION_RECORD_MISSING", id); }
       exportBytes = exportFiles.get(entry.exportFile);
       if (!exportBytes) add("EXPORT_MISSING", id);
       if (approvedBytes && sha256(approvedBytes) !== entry.approvedSqlSha256)
@@ -299,6 +400,15 @@ export async function validateOfflineBundle(bundleDirectory, policyFile, expecte
              record.currentUser !== policy.approvedIdentity.currentUser ||
              record.sessionUser !== policy.approvedIdentity.sessionUser))
           add("EXECUTION_IDENTITY_MISMATCH", id);
+        const recordDatabaseValid = databaseIdentity(record.databaseName,
+          `${id}:record.databaseName`,add);
+        const recordVersionValid = databaseIdentity(record.postgresVersion,
+          `${id}:record.postgresVersion`,add);
+        if (recordDatabaseValid && policyDatabaseValid &&
+            record.databaseName !== policy.database_name) add("DATABASE_MISMATCH",`${id}:record`);
+        if (recordVersionValid && policyVersionValid &&
+            record.postgresVersion !== policy.postgres_version)
+          add("POSTGRES_VERSION_MISMATCH",`${id}:record`);
         if (!utcInstant(record.executedAtUtc)) add("UTC_TIME_MISSING_OR_INVALID", id);
         if (record.success !== true) add("QUERY_NOT_SUCCESSFUL", id);
         if (record.exportFile !== entry.exportFile ||
@@ -317,10 +427,11 @@ export async function validateOfflineBundle(bundleDirectory, policyFile, expecte
           add("EXPORT_ROW_COUNT_MISMATCH", id);
         if (id === "snapshot") {
           snapshotRows = parsed;
-          evidenceFindings.push(...snapshotStructureFindings(parsed));
+          evidenceFindings.push(...snapshotStructureFindings(parsed,policy?.stage));
         }
         else migrationVersions = parsed;
-      } catch { add("EXPORT_FORMAT_INVALID", id); }
+      } catch (error) { add(error instanceof DuplicateJsonKeyError
+        ? "DUPLICATE_JSON_KEY" : "EXPORT_FORMAT_INVALID", id); }
     }
   }
   if (!seenIds.has("snapshot")) add("MISSING_QUERY", "snapshot");
@@ -336,6 +447,26 @@ export async function validateOfflineBundle(bundleDirectory, policyFile, expecte
     add("UNEXPECTED_QUERY", "migration-history with absent registry");
   if (registryExists === false && (manifest?.stage !== "empty" ||
       manifest?.adminIdentity !== "absent")) add("REGISTRY_STAGE_CONFLICT", "non-empty stage");
+
+  const databaseRows = snapshotRows?.filter((row) => row?.section === "database") ?? [];
+  if (databaseRows.length !== 1) add(databaseRows.length === 0
+    ? "DATABASE_IDENTITY_MISSING" : "DATABASE_IDENTITY_INVALID",
+  "exactly one snapshot database row required");
+  else {
+    const databaseRow = databaseRows[0];
+    const snapshotDatabaseValid = databaseIdentity(databaseRow.data?.name,
+      "snapshot.database.name",add);
+    const snapshotVersionValid = databaseIdentity(databaseRow.data?.server_version,
+      "snapshot.database.server_version",add);
+    if (snapshotDatabaseValid && databaseRow.item !== databaseRow.data.name)
+      add("DATABASE_MISMATCH","snapshot database row key and name");
+    if (snapshotDatabaseValid && policyDatabaseValid &&
+        databaseRow.data.name !== policy.database_name)
+      add("DATABASE_MISMATCH","snapshot and policy");
+    if (snapshotVersionValid && policyVersionValid &&
+        databaseRow.data.server_version !== policy.postgres_version)
+      add("POSTGRES_VERSION_MISMATCH","snapshot and policy");
+  }
 
   const evidenceDecision = evidenceFindings.length ? "BLOCKED" : "PASS";
   const securityFindings = [blocked("BASELINE_NOT_APPROVED",
@@ -360,7 +491,8 @@ export async function validateOfflineBundle(bundleDirectory, policyFile, expecte
     scope:"OFFLINE_PROTOTYPE_ONLY",
     policyAuthenticity:"UNVERIFIED_OFFLINE_INPUT",
     executionAuthenticity:"UNVERIFIED_OFFLINE_RECORD",
-    evidence:{ decision:evidenceDecision, findings:evidenceFindings },
+    evidence:{ decision:evidenceDecision, rawExportCompleteness:"UNVERIFIED",
+      findings:evidenceFindings },
     security:{ decision:"BLOCKED", checkerDecision, findings:securityFindings },
   };
 }

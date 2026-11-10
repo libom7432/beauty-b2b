@@ -1,5 +1,6 @@
 import type { InquiryItem } from "@/lib/catalog/inquiry";
 import type { AttributeValue, LocalizedText } from "@/lib/catalog/types";
+import type { Availability } from "@/lib/catalog-read/types";
 
 export type RFQContact = {
   fullName: string;
@@ -40,8 +41,14 @@ export type RFQTrustedItemSnapshot = RFQItemSnapshot & {
   moqUnitAtSubmission: string;
   belowMoq: boolean;
 };
-export type RFQPublicCatalogLookup = Pick<import("@/lib/catalog-read/repository-core").CatalogReadRepository,
-  "getPublishedProductsByIds">;
+export type RFQPublicProduct = Readonly<{ id: string; slug: string;
+  translations: { en: Availability<{ name: string }>; zh: Availability<{ name: string }> };
+  variants: readonly Readonly<{ id: string; sku: string;
+    attributes: Readonly<Record<string, string | number | boolean>>;
+    moq: Readonly<{ quantity: number; unit: string }> }>[] }>;
+export type RFQPublicCatalogLookup = Readonly<{
+  getPublishedProductsByIds(ids: readonly string[]): Promise<readonly RFQPublicProduct[]>;
+}>;
 
 // Only a future server workflow may assign id, createdAt and status.
 export type RFQSubmission = Omit<RFQDraft, "items"> & {

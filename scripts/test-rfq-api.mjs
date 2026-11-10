@@ -32,6 +32,7 @@ const { createRFQHandler, fingerprintRFQ, RFQ_MAX_BODY_BYTES } = load("src/lib/r
 const { createLocalRFQRoute } = load("src/lib/rfq/local-route");
 const { localTestConnection } = load("src/lib/rfq/local-connection");
 const { validateRFQDraft } = load("src/lib/rfq/validation");
+const { CatalogReadError } = load("src/lib/catalog-read/errors");
 
 const product = mockProducts[0];
 const other = mockProducts[1];
@@ -334,5 +335,128 @@ await test("local repository failure returns a fixed safe error", async () => {
       "Content-Type": "application/json", "Idempotency-Key": key } }));
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: "RFQ_UNAVAILABLE" });
+});
+
+const publicId = "00000001-0000-4000-8000-000000000000";
+const variantId = "00000101-0000-4000-8000-000000000000";
+const publicBase = { ...base, items: [{ productId: publicId, sku: "PUBLIC-SKU", quantity: 50 }] };
+const published = (moq = 100) => ({ id: publicId, slug: "published-product",
+  translations: { en: { state: "available", value: { name: "Published product" } },
+    zh: { state: "available", value: { name: "已发布商品" } } },
+  variants: [{ id: variantId, sku: "PUBLIC-SKU", attributes: { color: "red" },
+    moq: { quantity: moq, unit: "pieces" }, referencePrice: { kind: "usd_reference", amount: "12.00", currency: "USD" } }],
+});
+function trustedFixture(initial = published()) {
+  const repository = new FakeRepository();
+  const state = { product: initial, error: null, calls: 0 };
+  const trustedCatalog = { async getPublishedProductsByIds(ids) {
+    state.calls++;
+    assert.deepEqual(ids, [publicId]);
+    if (state.error) throw state.error;
+    if (!state.product) throw new CatalogReadError("NOT_FOUND");
+    return [state.product];
+  } };
+  const handler = createRFQHandler({ catalog: mockProducts, trustedCatalog, catalogVerified: true,
+    repository, guards, number: () => "RFQ-20261012-012345ABCDEF" });
+  return { repository, state, handler };
+}
+await test("trusted Catalog new request passes complete low-MOQ snapshot to Repository", async () => {
+  const fixture = trustedFixture();
+  const response = await fixture.handler(request(publicBase));
+  assert.equal(response.status, 201);
+  assert.equal(fixture.state.calls, 1);
+  assert.equal(fixture.repository.rows.size, 1);
+  assert.equal(fixture.repository.items.length, 1);
+  assert.equal(fixture.repository.jobs.length, 1);
+  const item = fixture.repository.items[0];
+  assert.deepEqual(item, { productId: publicId, sku: "PUBLIC-SKU", quantity: 50,
+    productName: { en: "Published product", zh: "已发布商品" }, productSlug: "published-product",
+    selectedVariant: { id: variantId, attributes: { color: "red" } },
+    moqAtSubmission: 100, moqUnitAtSubmission: "pieces", belowMoq: true });
+  assert.equal(JSON.stringify(item).includes("12.00"), false);
+});
+await test("trusted Catalog allows equal and above MOQ with false marker", async () => {
+  for (const quantity of [100, 150]) {
+    const fixture = trustedFixture();
+    assert.equal((await fixture.handler(request({ ...publicBase,
+      items: [{ ...publicBase.items[0], quantity }] }))).status, 201);
+    assert.equal(fixture.repository.items[0].belowMoq, false);
+    assert.equal(fixture.repository.items[0].moqAtSubmission, 100);
+  }
+});
+await test("client MOQ, unit, marker and price cannot become a trusted snapshot", async () => {
+  for (const extra of [{ moqAtSubmission: 1 }, { moqUnitAtSubmission: "fake" },
+    { belowMoq: false }, { referencePrice: "1.00" }]) {
+    const fixture = trustedFixture();
+    const body = { ...publicBase, items: [{ ...publicBase.items[0], ...extra }] };
+    assert.equal((await fixture.handler(request(body))).status, 422);
+    assert.equal(fixture.state.calls, 0);
+    assert.equal(fixture.repository.rows.size, 0);
+  }
+});
+await test("missing product, retired variant, wrong SKU and invalid MOQ fail before write", async () => {
+  for (const product of [null, { ...published(), variants: [] }, published(0)]) {
+    const fixture = trustedFixture(product);
+    assert.equal((await fixture.handler(request(publicBase))).status, 422);
+    assert.equal(fixture.repository.rows.size, 0);
+    assert.equal(fixture.repository.items.length, 0);
+  }
+  const fixture = trustedFixture();
+  assert.equal((await fixture.handler(request({ ...publicBase,
+    items: [{ ...publicBase.items[0], sku: "WRONG" }] }))).status, 422);
+  assert.equal(fixture.repository.rows.size, 0);
+});
+await test("trusted Catalog failure does not fall back to Mock or write", async () => {
+  const fixture = trustedFixture();
+  fixture.state.error = new CatalogReadError("SOURCE_UNAVAILABLE");
+  const response = await fixture.handler(request(publicBase));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "RFQ_UNAVAILABLE" });
+  assert.equal(fixture.repository.rows.size, 0);
+  assert.equal(fixture.repository.jobs.length, 0);
+});
+await test("trusted request write failure rolls back all three records", async () => {
+  for (const stage of ["request", "items", "job"]) {
+    const fixture = trustedFixture();
+    fixture.repository.failAt = stage;
+    assert.equal((await fixture.handler(request(publicBase))).status, 503);
+    assert.equal(fixture.repository.rows.size, 0);
+    assert.equal(fixture.repository.items.length, 0);
+    assert.equal(fixture.repository.jobs.length, 0);
+  }
+});
+await test("trusted historical key replays without new lookup or MOQ recalculation", async () => {
+  const fixture = trustedFixture();
+  assert.equal((await fixture.handler(request(publicBase))).status, 201);
+  fixture.state.product = published(40);
+  assert.equal((await fixture.handler(request(publicBase))).status, 200);
+  assert.equal(fixture.state.calls, 1);
+  assert.equal(fixture.repository.items[0].moqAtSubmission, 100);
+  assert.equal(fixture.repository.items[0].belowMoq, true);
+  fixture.state.product = null;
+  assert.equal((await fixture.handler(request(publicBase))).status, 200);
+  assert.equal((await fixture.handler(request({ ...publicBase,
+    requirements: "A changed business requirement." }))).status, 409);
+  assert.equal((await fixture.handler(request(publicBase,
+    { "Idempotency-Key": "0199e4df-b0ab-7000-8000-9e1a4cc0ac03" }))).status, 422);
+  assert.equal(fixture.repository.rows.size, 1);
+  assert.equal(fixture.repository.jobs.length, 1);
+});
+await test("concurrent trusted submissions retain one request and one snapshot", async () => {
+  const fixture = trustedFixture();
+  const responses = await Promise.all(Array.from({ length: 8 }, () => fixture.handler(request(publicBase))));
+  assert.deepEqual(responses.map((response) => response.status).sort(), [201, ...Array(7).fill(200)].sort());
+  assert.equal(fixture.repository.rows.size, 1);
+  assert.equal(fixture.repository.items.length, 1);
+  assert.equal(fixture.repository.jobs.length, 1);
+});
+await test("closed configuration rejects trusted lookup before database work", async () => {
+  const fixture = trustedFixture();
+  const closed = createRFQHandler({ catalog: mockProducts,
+    trustedCatalog: { async getPublishedProductsByIds() { fixture.state.calls++; return [published()]; } },
+    catalogVerified: false, repository: fixture.repository, guards });
+  assert.equal((await closed(request(publicBase))).status, 503);
+  assert.equal(fixture.state.calls, 0);
+  assert.equal(fixture.repository.rows.size, 0);
 });
 console.log(`RFQ API: ${passed} passed, 0 failed, 0 skipped`);

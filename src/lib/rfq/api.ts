@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Product } from "@/lib/catalog/types";
-import { snapshotRFQItems } from "./items";
-import type { RFQDraft, RFQItemSnapshot, RFQValidationError } from "./types";
+import { CatalogReadError } from "@/lib/catalog-read/errors";
+import { snapshotRFQItems, snapshotRFQItemsFromPublicCatalog } from "./items";
+import type { RFQDraft, RFQItemSnapshot, RFQPublicCatalogLookup, RFQValidationError } from "./types";
 import { validateRFQDraft, validateRFQDraftStructure } from "./validation";
 
 export const RFQ_MAX_BODY_BYTES = 32 * 1024;
@@ -27,6 +28,8 @@ export type RFQGuards = {
 };
 export type RFQDependencies = {
   catalog: readonly Product[];
+  /** Optional public lookup for a future server path; no Mock fallback. */
+  trustedCatalog?: RFQPublicCatalogLookup;
   repository: RFQRepository | null;
   guards: RFQGuards | null;
   catalogVerified: boolean;
@@ -136,9 +139,18 @@ export function createRFQHandler(deps: RFQDependencies) {
           : { status: 409 as const };
         // Only a new key needs the live catalog. A historical key may replay
         // after its product or SKU is no longer offered.
-        const checked = validateRFQDraft(structured.value, deps.catalog);
+        const checked = deps.trustedCatalog ? { ok: true as const, value: structured.value }
+          : validateRFQDraft(structured.value, deps.catalog);
         if (!checked.ok) return { status: 422 as const, errors: checked.errors };
-        const snapshots = snapshotRFQItems(checked.value.items, deps.catalog);
+        let snapshots;
+        if (deps.trustedCatalog) {
+          try { snapshots = await snapshotRFQItemsFromPublicCatalog(checked.value.items, deps.trustedCatalog); }
+          catch (error) {
+            if (error instanceof CatalogReadError && (error.code === "NOT_FOUND" || error.code === "INVALID_INPUT"))
+              return { status: 422 as const, errors: [{ field: "items", code: "INVALID_PRODUCT" as const }] };
+            throw error;
+          }
+        } else snapshots = snapshotRFQItems(checked.value.items, deps.catalog);
         if (!snapshots.ok) return { status: 422 as const, errors: snapshots.errors };
         const record = await tx.insertRequestIfAbsent({ key, fingerprint,
           rfqNumber: (deps.number ?? makeRFQNumber)(), draft: checked.value, items: snapshots.value });

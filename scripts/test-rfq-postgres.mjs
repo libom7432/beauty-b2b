@@ -25,7 +25,8 @@ function load(relativePath) {
   return record.exports;
 }
 
-const { PostgreSQLRFQRepository, RFQDatabaseError, mapRFQDatabaseError, rfqPoolConfiguration } =
+const { PostgreSQLRFQRepository, RFQDatabaseError, mapRFQDatabaseError, rfqPoolConfiguration,
+  serializeRFQProductSnapshot } =
   load("src/lib/rfq/postgres-repository");
 const { verifiedLocalPool } = load("src/lib/rfq/local-postgres-repository");
 const { createRFQHandler } = load("src/lib/rfq/api");
@@ -40,6 +41,12 @@ const draft = {
 const snapshots = [{ ...draft.items[0], productName: mockProducts[0].name,
   productSlug: mockProducts[0].slug, selectedVariant: { id: mockProducts[0].variants[0].id,
     attributes: mockProducts[0].variants[0].attributes } }];
+const trustedSnapshot = (quantity, moq = 100) => ({ ...snapshots[0],
+  productId: "00000001-0000-4000-8000-000000000000",
+  sku: "PUBLIC-SKU", quantity,
+  selectedVariant: { id: "00000101-0000-4000-8000-000000000000", attributes: { color: "red" } },
+  moqAtSubmission: moq, moqUnitAtSubmission: "pieces", belowMoq: quantity < moq });
+const without = (value, key) => Object.fromEntries(Object.entries(value).filter(([name]) => name !== key));
 const write = (overrides = {}) => ({ key, fingerprint: "a".repeat(64),
   rfqNumber: "RFQ-20261012-012345ABCDEF", draft, items: snapshots, ...overrides });
 const row = (w) => ({ id: "0199e4df-b0ab-7000-8000-9e1a4cc0ac02", rfq_number: w.rfqNumber,
@@ -170,6 +177,48 @@ await test("three table transaction writes allowed columns and commits on one cl
   assert.equal(pool.queries[1].sql, "SET LOCAL statement_timeout = 8000");
   assert.ok(pool.queries.every(({ client }) => client === pool.clients[0]));
   assert.equal(pool.clients[0].released, false);
+});
+await test("trusted MOQ JSONB payload round-trips without losing old snapshot fields", async () => {
+  for (const [quantity, expected] of [[50, true], [100, false]]) {
+    const pool = new MockPool();
+    const item = trustedSnapshot(quantity);
+    await save(new PostgreSQLRFQRepository(pool), write({ items: [item] }));
+    const stored = JSON.parse(pool.items[0][4]);
+    assert.deepEqual(stored, { productName: item.productName, productSlug: item.productSlug,
+      selectedVariant: item.selectedVariant, moqAtSubmission: 100,
+      moqUnitAtSubmission: "pieces", belowMoq: expected });
+    assert.equal(pool.items[0][1], item.productId);
+    assert.equal(pool.items[0][2], item.sku);
+    assert.equal(pool.items[0][3], quantity);
+    assert.equal(pool.jobs.length, 1);
+  }
+});
+await test("missing or malformed trusted MOQ fails before item insert and rolls back request", async () => {
+  const valid = trustedSnapshot(50);
+  const malformed = [
+    without(without(without(valid, "moqAtSubmission"), "moqUnitAtSubmission"), "belowMoq"),
+    without(valid, "moqAtSubmission"), without(valid, "moqUnitAtSubmission"), without(valid, "belowMoq"),
+    { ...valid, moqAtSubmission: 0 }, { ...valid, moqAtSubmission: 1.5 },
+    { ...valid, moqUnitAtSubmission: "" }, { ...valid, moqUnitAtSubmission: " pieces" },
+    { ...valid, belowMoq: false }, { ...valid, referencePrice: "12.00" },
+  ];
+  for (const item of malformed) {
+    const pool = new MockPool();
+    await expectError(() => save(new PostgreSQLRFQRepository(pool), write({ items: [item] })),
+      "UNEXPECTED_DATABASE_ERROR");
+    assert.equal(pool.rows.size, 0); assert.equal(pool.items.length, 0); assert.equal(pool.jobs.length, 0);
+    assert.ok(pool.queries.some(({ sql }) => sql === "ROLLBACK"));
+  }
+});
+await test("historical local snapshot remains legacy-shaped and is never assigned invented MOQ", async () => {
+  const pool = new MockPool();
+  await save(new PostgreSQLRFQRepository(pool));
+  const stored = JSON.parse(pool.items[0][4]);
+  assert.deepEqual(Object.keys(stored).sort(), ["productName", "productSlug", "selectedVariant"].sort());
+  assert.equal(Object.hasOwn(stored, "belowMoq"), false);
+  assert.equal(Object.hasOwn(stored, "moqAtSubmission"), false);
+  assert.equal(Object.hasOwn(stored, "moqUnitAtSubmission"), false);
+  assert.equal(serializeRFQProductSnapshot(snapshots[0]), pool.items[0][4]);
 });
 await test("request, items, and notification failures roll back and discard", async () => {
   for (const failAt of ["REQUEST", "ITEMS", "NOTIFICATION"]) {

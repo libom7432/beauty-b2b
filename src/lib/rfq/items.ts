@@ -1,6 +1,7 @@
 import { validQuantity, type InquiryItem } from "@/lib/catalog/inquiry";
 import type { Product } from "@/lib/catalog/types";
-import type { RFQDraftItem, RFQItemSnapshot, RFQResult, RFQValidationError } from "./types";
+import type { RFQDraftItem, RFQItemSnapshot, RFQPublicCatalogLookup, RFQResult,
+  RFQTrustedItemSnapshot, RFQValidationError } from "./types";
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -69,4 +70,42 @@ export function snapshotRFQItems(input: unknown, products: readonly Product[]): 
     };
   });
   return { ok: true, value: snapshots };
+}
+
+/** Candidate for the future server workflow. Caller must supply a connected public Catalog
+ * repository; the existing Mock-backed RFQ API is deliberately not wired here. */
+export async function snapshotRFQItemsFromPublicCatalog(input: unknown,
+  catalog: RFQPublicCatalogLookup): Promise<RFQResult<RFQTrustedItemSnapshot[]>> {
+  const checked = validateRFQItemStructure(input);
+  if (!checked.ok) return checked;
+  const productIds = [...new Set(checked.value.map((item) => item.productId))];
+  // Lookup validates UUIDs, bounds the request, and rejects missing/unpublished products.
+  const products = await catalog.getPublishedProductsByIds(productIds);
+  const byId = new Map(products.map((product) => [product.id.toLowerCase(), product]));
+  const errors: RFQValidationError[] = [];
+  const snapshots = checked.value.flatMap((item, index): RFQTrustedItemSnapshot[] => {
+    const product = byId.get(item.productId.toLowerCase());
+    const variant = product?.variants.find((candidate) => candidate.sku === item.sku);
+    if (!product || !variant || !item.sku) {
+      errors.push({ field: `items[${index}].sku`, code: "INVALID_PRODUCT" });
+      return [];
+    }
+    const { quantity: moq, unit } = variant.moq;
+    if (!validQuantity(moq) || typeof unit !== "string" || !unit.trim() || unit !== unit.trim() ||
+      unit.length > 64 || /[\x00-\x1f\x7f]/.test(unit)) {
+      errors.push({ field: `items[${index}].sku`, code: "INVALID_PRODUCT" });
+      return [];
+    }
+    const en = product.translations.en;
+    const zh = product.translations.zh;
+    if (en.state !== "available" || zh.state !== "available" || !en.value.name.trim() || !zh.value.name.trim()) {
+      errors.push({ field: `items[${index}].productId`, code: "INVALID_PRODUCT" });
+      return [];
+    }
+    return [{ productId: product.id, sku: variant.sku, quantity: item.quantity,
+      productName: { en: en.value.name, zh: zh.value.name }, productSlug: product.slug,
+      selectedVariant: { id: variant.id, attributes: { ...variant.attributes } },
+      moqAtSubmission: moq, moqUnitAtSubmission: unit, belowMoq: item.quantity < moq }];
+  });
+  return errors.length ? { ok: false, errors } : { ok: true, value: snapshots };
 }

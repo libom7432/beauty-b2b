@@ -24,7 +24,7 @@ function load(relativePath) {
 
 const { mockProducts } = load("src/lib/catalog/mock-products");
 const { validateRFQDraft, RFQ_FIELD_LIMITS } = load("src/lib/rfq/validation");
-const { inquiryItemsToRFQDraftItems, snapshotRFQItems } = load("src/lib/rfq/items");
+const { inquiryItemsToRFQDraftItems, snapshotRFQItems, snapshotRFQItemsFromPublicCatalog } = load("src/lib/rfq/items");
 const { canonicalRFQDraft, createInitialRFQFormValues, isRFQFormDirty } = load("src/lib/rfq/form-state");
 const product = mockProducts[0];
 const variant = product.variants[0];
@@ -152,4 +152,68 @@ test("variantless SKU accepts absent or empty text and rejects other types", () 
   }
 });
 
+const publicId = "00000001-0000-4000-8000-000000000000";
+const publicVariantId = "00000101-0000-4000-8000-000000000000";
+const publicProduct = (moq = 100, unit = "pieces") => ({ id: publicId, slug: "published-product",
+  translations: { en: { state: "available", value: { name: "Published product" } },
+    zh: { state: "available", value: { name: "已发布商品" } } },
+  variants: [{ id: publicVariantId, sku: "PUBLIC-SKU", moq: { quantity: moq, unit }, attributes: { color: "red" } }],
+});
+const publicLookup = (product = publicProduct()) => ({ async getPublishedProductsByIds(ids) {
+  assert.deepEqual(ids, [publicId]);
+  if (!product) throw Object.assign(Error("unavailable"), { code: "NOT_FOUND" });
+  return [product];
+} });
+const publicItem = (quantity, extra = {}) => [{ productId: publicId, sku: "PUBLIC-SKU", quantity, ...extra }];
+async function asyncTest(name, run) { await run(); passed += 1; }
+await asyncTest("trusted MOQ snapshots mark below, equal and above without blocking", async () => {
+  for (const [quantity, expected] of [[99, true], [100, false], [101, false]]) {
+    const result = await snapshotRFQItemsFromPublicCatalog(publicItem(quantity), publicLookup());
+    assert.equal(result.ok, true);
+    assert.deepEqual([result.value[0].moqAtSubmission, result.value[0].moqUnitAtSubmission,
+      result.value[0].belowMoq], [100, "pieces", expected]);
+    assert.deepEqual(result.value[0].selectedVariant,
+      { id: publicVariantId, attributes: { color: "red" } });
+  }
+});
+await asyncTest("trusted MOQ ignores client-provided MOQ, price and below flag", async () => {
+  const result = await snapshotRFQItemsFromPublicCatalog(publicItem(50,
+    { moqAtSubmission: 1, moqUnitAtSubmission: "fake", belowMoq: false, price: 1 }), publicLookup());
+  assert.equal(result.ok, true);
+  assert.equal(result.value[0].moqAtSubmission, 100);
+  assert.equal(result.value[0].moqUnitAtSubmission, "pieces");
+  assert.equal(result.value[0].belowMoq, true);
+  assert.equal(Object.hasOwn(result.value[0], "price"), false);
+});
+await asyncTest("trusted MOQ rejects missing, invalid SKU, quantity, MOQ and unit", async () => {
+  for (const candidate of [null])
+    await assert.rejects(snapshotRFQItemsFromPublicCatalog(publicItem(1), publicLookup(candidate)), { code: "NOT_FOUND" });
+  for (const candidate of [publicItem(1, { sku: "OTHER" }), publicItem(0), publicItem(1.5)]) {
+    const result = await snapshotRFQItemsFromPublicCatalog(candidate, publicLookup());
+    assert.equal(result.ok, false);
+  }
+  for (const [moq, unit] of [[0, "pieces"], [1.5, "pieces"], [null, "pieces"],
+    [100, ""], [100, " pieces"], [100, null]]) {
+    const result = await snapshotRFQItemsFromPublicCatalog(publicItem(50), publicLookup(publicProduct(moq, unit)));
+    assert.equal(result.ok, false);
+  }
+});
+await asyncTest("a later MOQ change affects only a newly constructed candidate snapshot", async () => {
+  const first = await snapshotRFQItemsFromPublicCatalog(publicItem(50), publicLookup(publicProduct(100)));
+  const later = await snapshotRFQItemsFromPublicCatalog(publicItem(50), publicLookup(publicProduct(40)));
+  assert.equal(first.value[0].belowMoq, true);
+  assert.equal(later.value[0].belowMoq, false);
+  assert.deepEqual(first.value[0].moqAtSubmission, 100);
+  assert.deepEqual(later.value[0].moqAtSubmission, 40);
+});
+test("both locale dictionaries provide the approved, nonblocking MOQ message", () => {
+  const zh = load("src/i18n/zh").default;
+  const en = load("src/i18n/en").default;
+  assert.equal(zh.rfqForm.belowMoqHint,
+    "您的询盘数量低于常规起订量，仍可提交询价，是否接受由供应商最终确认。");
+  assert.equal(en.rfqForm.belowMoqHint,
+    "Your requested quantity is below the standard MOQ. You can still submit an inquiry; acceptance is subject to supplier confirmation.");
+  assert.match(zh.rfqForm.moqPreviewNote, /测试数据/);
+  assert.match(en.rfqForm.moqPreviewNote, /test data/);
+});
 console.log(`RFQ validation: ${passed} passed, 0 failed, 0 skipped`);

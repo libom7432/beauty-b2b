@@ -321,7 +321,7 @@ export function RFQForm({ locale, countryOptions, submitEnabled = false }: { loc
       const itemError = errors.find((error) => error.field.startsWith(`items[${index}]`));
       return <div className="rfq-summary-item" key={`${item.productId}:${item.sku}`}>
         {product && <CatalogMedia visual={image?.visual ?? product.images[0]?.visual ?? "press-on"} image={image} alt={image?.alt[locale] ?? product.name[locale]} sizes="80px" />}
-        <div><strong>{product?.name[locale] ?? item.productId}</strong><span>SKU: {item.sku}</span>{variant && <span>{copy.variant}: {Object.values(variant.attributes).map(String).join(" · ") || variant.sku}</span>}<span>{copy.quantity}: {item.quantity}</span>{image?.isPlaceholder && <small>{copy.placeholder}</small>}{itemError && <small className="rfq-summary-error">{errorText(itemError)}</small>}</div>
+        <div><strong>{product?.name[locale] ?? item.productId}</strong><span>SKU: {item.sku}</span>{variant && <span>{copy.variant}: {Object.values(variant.attributes).map(String).join(" · ") || variant.sku}</span>}<span>{copy.quantity}: {item.quantity}</span>{variant && item.quantity < variant.moq.quantity && <small role="status">{copy.belowMoqHint} {copy.moqPreviewNote}</small>}{image?.isPlaceholder && <small>{copy.placeholder}</small>}{itemError && <small className="rfq-summary-error">{errorText(itemError)}</small>}</div>
       </div>;
     })}
     {attempted && errors.some((error) => error.field === "items") && <p className="rfq-summary-error">{errorText(errors.find((error) => error.field === "items"))}</p>}
@@ -353,7 +353,8 @@ export function RFQForm({ locale, countryOptions, submitEnabled = false }: { loc
     </div><aside className="rfq-summary"><h2>{copy.summary}</h2><p>{copy.itemCount.replace("{count}", String(review.items.length))}</p>{snapshots.ok && snapshots.value.map((item) => {
       const product = products.find((candidate) => candidate.id === item.productId);
       const image = product?.images[product.variants.find((variant) => variant.sku === item.sku)?.imageIndex ?? 0] ?? product?.images[0];
-      return <div className="rfq-summary-item" key={`${item.productId}:${item.sku}`}>{product && <CatalogMedia visual={image?.visual ?? product.images[0]?.visual ?? "press-on"} image={image} alt={image?.alt[locale] ?? item.productName[locale]} sizes="80px" />}<div><strong>{item.productName[locale]}</strong>{item.sku && <span>SKU: {item.sku}</span>}{item.selectedVariant && <span>{copy.variant}: {Object.values(item.selectedVariant.attributes).map(String).join(" · ") || item.sku}</span>}<span>{copy.quantity}: {item.quantity}</span></div></div>;
+      const variant = product?.variants.find((candidate) => candidate.sku === item.sku);
+      return <div className="rfq-summary-item" key={`${item.productId}:${item.sku}`}>{product && <CatalogMedia visual={image?.visual ?? product.images[0]?.visual ?? "press-on"} image={image} alt={image?.alt[locale] ?? item.productName[locale]} sizes="80px" />}<div><strong>{item.productName[locale]}</strong>{item.sku && <span>SKU: {item.sku}</span>}{item.selectedVariant && <span>{copy.variant}: {Object.values(item.selectedVariant.attributes).map(String).join(" · ") || item.sku}</span>}<span>{copy.quantity}: {item.quantity}</span>{variant && item.quantity < variant.moq.quantity && <small role="status">{copy.belowMoqHint} {copy.moqPreviewNote}</small>}</div></div>;
     })}</aside></div></section>{leaveConfirmation}</>;
   }
 

@@ -1,5 +1,5 @@
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
-import type { RFQItemSnapshot } from "./types";
+import type { RFQItemSnapshot, RFQTrustedItemSnapshot } from "./types";
 import type { RFQRecord, RFQRepository, RFQTransaction, RFQWrite } from "./api";
 
 export type RFQDatabaseErrorKind =
@@ -110,6 +110,36 @@ RETURNING id, rfq_number, request_fingerprint, status, created_at`;
 const INSERT_NOTIFICATION = `INSERT INTO rfq_private.rfq_notification_jobs (rfq_request_id)
 VALUES ($1)`;
 
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const snapshotFields = new Set(["productId", "sku", "quantity", "productName", "productSlug",
+  "selectedVariant", "moqAtSubmission", "moqUnitAtSubmission", "belowMoq"]);
+
+/** Preserve the old local Mock shape while requiring the complete MOQ contract
+ * for public Catalog UUIDs. Historical stored rows are never rewritten here. */
+export function serializeRFQProductSnapshot(item: RFQItemSnapshot | RFQTrustedItemSnapshot): string {
+  const candidate = item as RFQItemSnapshot & Partial<RFQTrustedItemSnapshot>;
+  if (Object.keys(candidate).some((key) => !snapshotFields.has(key)))
+    throw new RFQDatabaseError("UNEXPECTED_DATABASE_ERROR");
+  const moqKeys = ["moqAtSubmission", "moqUnitAtSubmission", "belowMoq"] as const;
+  const present = moqKeys.map((key) => Object.hasOwn(candidate, key));
+  if (present.some(Boolean) || uuid.test(candidate.productId)) {
+    if (!present.every(Boolean) || !Number.isSafeInteger(candidate.moqAtSubmission) ||
+      (candidate.moqAtSubmission ?? 0) < 1 ||
+      typeof candidate.moqUnitAtSubmission !== "string" ||
+      !candidate.moqUnitAtSubmission.trim() ||
+      candidate.moqUnitAtSubmission !== candidate.moqUnitAtSubmission.trim() ||
+      candidate.moqUnitAtSubmission.length > 64 || /[\x00-\x1f\x7f]/.test(candidate.moqUnitAtSubmission) ||
+      !Number.isSafeInteger(candidate.quantity) || candidate.quantity < 1 ||
+      typeof candidate.belowMoq !== "boolean" ||
+      candidate.belowMoq !== (candidate.quantity < candidate.moqAtSubmission!))
+      throw new RFQDatabaseError("UNEXPECTED_DATABASE_ERROR");
+  }
+  return JSON.stringify({ productName: candidate.productName, productSlug: candidate.productSlug,
+    selectedVariant: candidate.selectedVariant,
+    ...(present.every(Boolean) ? { moqAtSubmission: candidate.moqAtSubmission,
+      moqUnitAtSubmission: candidate.moqUnitAtSubmission, belowMoq: candidate.belowMoq } : {}) });
+}
+
 class PostgreSQLRFQTransaction implements RFQTransaction {
   constructor(private readonly client: PoolClient) {}
 
@@ -134,8 +164,7 @@ class PostgreSQLRFQTransaction implements RFQTransaction {
     const placeholders = items.map((item) => {
       const offset = values.length;
       values.push(requestId, item.productId, item.sku ?? null, item.quantity,
-        JSON.stringify({ productName: item.productName, productSlug: item.productSlug,
-          selectedVariant: item.selectedVariant }));
+        serializeRFQProductSnapshot(item));
       return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}::jsonb)`;
     });
     const sql = `INSERT INTO rfq_private.rfq_items

@@ -31,6 +31,18 @@ export type RFQItemSnapshot = RFQDraftItem & {
   selectedVariant: { id: string; attributes: Record<string, AttributeValue> } | null;
 };
 
+/** A new RFQ's server-validated Catalog snapshot carries MOQ quantity, unit,
+ * and belowMoq. The PostgreSQL Repository serializes them into product_snapshot
+ * JSONB. Older snapshots may lack these fields; never infer default values.
+ * Real Supabase persistence has not been verified. */
+export type RFQTrustedItemSnapshot = RFQItemSnapshot & {
+  moqAtSubmission: number;
+  moqUnitAtSubmission: string;
+  belowMoq: boolean;
+};
+export type RFQPublicCatalogLookup = Pick<import("@/lib/catalog-read/repository-core").CatalogReadRepository,
+  "getPublishedProductsByIds">;
+
 // Only a future server workflow may assign id, createdAt and status.
 export type RFQSubmission = Omit<RFQDraft, "items"> & {
   id: string;

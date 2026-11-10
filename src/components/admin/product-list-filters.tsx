@@ -7,12 +7,15 @@ import type { AdminCategoryOptions } from "@/lib/catalog-read/types";
 import type { AdminProductsUrlQuery } from "@/lib/admin/products-query";
 
 type Fields = Pick<AdminProductsUrlQuery, "search" | "status" | "category" | "sort">;
-type ClearAttempt = { id: number; origin: string; target: "/admin/products" };
+type ClearAttempt = { id: number; origin: string; committedKey: string; target: "/admin/products" };
 const clean: Fields = { search: "", status: "all", category: "", sort: "updated_desc" };
 const fieldsOf = (query: AdminProductsUrlQuery): Fields => ({
   search: query.search, status: query.status, category: query.category, sort: query.sort,
 });
 const fieldKey = (fields: Fields) => JSON.stringify(fields);
+const committedQueryKey = (query: AdminProductsUrlQuery) => JSON.stringify([
+  fieldsOf(query), query.cursor, query.direction, query.page,
+]);
 const historyFields = (): Fields => {
   const params = new URLSearchParams(window.location.search);
   const status = params.get("status");
@@ -35,6 +38,7 @@ export function ProductListFilters({ query, categories, categoryOptionsUnavailab
   const locationKey = `${pathname}?${searchParams.toString()}`;
   const serverFields = fieldsOf(query);
   const serverKey = fieldKey(serverFields);
+  const committedKey = committedQueryKey(query);
   const [editable, setEditable] = useState<Fields>(serverFields);
   const [pending, setPending] = useState(false);
   const [recoverable, setRecoverable] = useState(false);
@@ -81,6 +85,17 @@ export function ProductListFilters({ query, categories, categoryOptionsUnavailab
       setRecoverable(false);
       return;
     }
+    if (attempt && committedKey !== attempt.committedKey) {
+      // A different server query committed while Clear was in flight. Its
+      // result now owns the form; the old Clear response may still arrive.
+      attemptRef.current = null;
+      observedServerKey.current = serverKey;
+      preserveLateClear.current = false;
+      setEditable(serverFields);
+      setPending(false);
+      setRecoverable(false);
+      return;
+    }
     if (serverKey !== observedServerKey.current) {
       observedServerKey.current = serverKey;
       if (preserveLateClear.current && clearCommitted) {
@@ -92,7 +107,7 @@ export function ProductListFilters({ query, categories, categoryOptionsUnavailab
         setRecoverable(false);
       }
     }
-  }, [locationKey, pathname, searchParams, serverKey, serverFields]);
+  }, [locationKey, pathname, searchParams, serverKey, serverFields, committedKey]);
 
   const beginClear = (event: { preventDefault(): void }) => {
     // A resumed request can still commit. Do not attach a second Clear attempt to its target.
@@ -104,7 +119,8 @@ export function ProductListFilters({ query, categories, categoryOptionsUnavailab
       setRecoverable(false);
       return;
     }
-    attemptRef.current = { id: ++nextAttemptId.current, origin: locationKey, target: "/admin/products" };
+    attemptRef.current = { id: ++nextAttemptId.current, origin: locationKey,
+      committedKey, target: "/admin/products" };
     preserveLateClear.current = false;
     setRecoverable(false);
     setPending(true);

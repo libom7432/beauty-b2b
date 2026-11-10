@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Request } from "@playwright/test";
 import { fixtureCookies, fixtureOrigin, startAdminFixture, stopAdminFixture } from "./support/admin-site";
 
 test.beforeAll(async () => { await startAdminFixture(); });
@@ -166,6 +166,73 @@ test("Clear in flight blocks stale Sort and supports explicit recovery", async (
   await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
   await expect(page.getByLabel("Sort by")).toBeEnabled();
   await expect(page.getByLabel("Sort by")).toHaveValue("updated_desc");
+});
+
+test("a committed Next page supersedes a held Clear without leaving filters locked", async ({ page, context }) => {
+  await fixtureCookies(context, "query");
+  await page.goto(`${fixtureOrigin}/admin/products?sort=product_code_desc`);
+  await expect(page.getByRole("link", { name: "Next" })).toBeVisible();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let releaseNext!: () => void;
+  const nextHeld = new Promise<void>((resolve) => { releaseNext = resolve; });
+  let observe!: () => void;
+  const observed = new Promise<void>((resolve) => { observe = resolve; });
+  let observeNext!: () => void;
+  const nextObserved = new Promise<void>((resolve) => { observeNext = resolve; });
+  let oldClearRequest: Request | null = null;
+  const requests: string[] = [];
+  await page.route("**/admin/products*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/admin/products" && url.searchParams.has("_rsc")) {
+      requests.push(url.search);
+      if (!url.searchParams.has("sort") && !url.searchParams.has("page")) {
+        oldClearRequest = route.request();
+        observe();
+        await held;
+      } else if (url.searchParams.get("page") === "2") {
+        observeNext();
+        await nextHeld;
+      }
+    }
+    await route.continue();
+  });
+  try {
+    await page.getByRole("link", { name: "Clear Filters" }).click();
+    await observed;
+    await expect(page.getByRole("button", { name: "Apply Filters" })).toBeDisabled();
+    await page.getByRole("link", { name: "Next" }).click();
+    await nextObserved;
+    await expect(page.getByRole("button", { name: "Apply Filters" })).toBeDisabled();
+    releaseNext();
+    await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/sort=product_code_desc.*page=2/);
+    await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-31");
+    await expect(page.getByRole("button", { name: "Apply Filters" })).toBeEnabled();
+    await expect(page.getByLabel("Sort by")).toHaveValue("product_code_desc");
+    await expect(page.getByText("Clearing filters.", { exact: false })).toHaveCount(0);
+    expect(requests).toHaveLength(2);
+
+    const oldSettled = new Promise<void>((resolve) => {
+      const finished = (request: Request) => {
+        if (request !== oldClearRequest) return;
+        page.off("requestfinished", finished);
+        page.off("requestfailed", finished);
+        resolve();
+      };
+      page.on("requestfinished", finished);
+      page.on("requestfailed", finished);
+    });
+    release();
+    await oldSettled;
+    await expect(page).toHaveURL(/sort=product_code_desc.*page=2/);
+    await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-31");
+    await expect(page.getByRole("button", { name: "Apply Filters" })).toBeEnabled();
+    await page.getByLabel("Sort by").selectOption("product_code_asc");
+    await page.getByRole("button", { name: "Apply Filters" }).click();
+    await expect(page).toHaveURL(/sort=product_code_asc/);
+    await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-1");
+  } finally { releaseNext(); release(); }
 });
 
 test("hung Clear can resume without claiming the request was cancelled", async ({ page, context }) => {

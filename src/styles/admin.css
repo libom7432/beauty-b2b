@@ -118,6 +118,17 @@
 .admin-table th { padding: 13px 20px; border-bottom: 1px solid var(--admin-line); background: #f7f9f6; color: #738075; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; white-space: nowrap; }
 .admin-table td { padding: 15px 20px; border-bottom: 1px solid var(--admin-line); font-size: 12px; }
 .admin-table tbody tr:last-child td { border-bottom: 0; }
+.admin-rfq-state { padding: 26px; color: var(--admin-muted); font-size: 13px; }
+.admin-rfq-detail { display: grid; gap: 18px; }
+.admin-rfq-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px 28px; margin: 20px 0 0; }
+.admin-rfq-fields div { min-width: 0; }
+.admin-rfq-fields dt { color: var(--admin-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.admin-rfq-fields dd { margin: 6px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 13px; }
+.admin-rfq-variant { display: block; margin-top: 4px; color: var(--admin-muted); overflow-wrap: anywhere; }
+.admin-rfq-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 16px; }
+.admin-rfq-actions button { padding: 8px 12px; border: 1px solid var(--admin-line); border-radius: 7px; background: #f4f5f2; color: var(--admin-muted); font-size: 11px; }
+.admin-rfq-actions button:disabled { cursor: not-allowed; opacity: .75; }
+@media (max-width: 600px) { .admin-rfq-fields { grid-template-columns: 1fr; } }
 .admin-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 220px; padding: 32px; text-align: center; }
 .admin-state-icon { display: grid; width: 42px; height: 42px; place-items: center; margin-bottom: 15px; border-radius: 50%; background: #edf1eb; color: #55705b; font-size: 18px; }
 .admin-state strong { font-size: 13px; }

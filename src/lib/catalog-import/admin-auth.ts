@@ -9,6 +9,7 @@ export const CATALOG_PERMISSIONS = [
   "catalog.import.receipts.read",
 ] as const;
 export type CatalogPermission = (typeof CATALOG_PERMISSIONS)[number];
+export type AdminPermission = CatalogPermission | "rfq.read" | "rfq.manage";
 export type AdminIdentity = Readonly<{
   admin_id: string;
   identity_provider: string;
@@ -16,7 +17,7 @@ export type AdminIdentity = Readonly<{
   status: "active" | "disabled";
   created_at: string;
   disabled_at: string | null;
-  permissions: readonly CatalogPermission[];
+  permissions: readonly AdminPermission[];
 }>;
 export type VerifiedProviderIdentity = Readonly<{ identity_provider: string; provider_subject: string }>;
 

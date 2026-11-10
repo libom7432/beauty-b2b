@@ -9,14 +9,19 @@ const descriptions: Record<string, string> = {
   Collections: "Review the curated groupings shown to buyers.",
   Media: "Review product image references and their relationships.",
   Imports: "Review catalog import receipts when the import service is connected.",
+  "RFQ Inbox": "Review customer inquiries after a separately authorized RFQ reader is connected.",
 };
 
 export const dynamic = "force-dynamic";
-export default async function AdminDashboard() {
+export default async function AdminDashboard({ searchParams }: {
+  searchParams: Promise<{ rfq?: string }>;
+}) {
   await requireAdminPage();
+  const rfqDenied = (await searchParams).rfq === "forbidden";
   const admin = await getAdminUIIdentity();
   const modules = visibleAdminNavigation(admin.permissions).filter((item) => item.href !== "/admin");
   return <>
+    {rfqDenied && <p role="alert" className="admin-card admin-rfq-state">You do not have permission to read inquiries.</p>}
     <AdminPageHeader eyebrow="WORKSPACE / OVERVIEW" title="Good to see you." description="A read-only view of the Admin foundation. Business data will appear only after an approved data source is connected."><AdminBadge tone="warning">Read only</AdminBadge></AdminPageHeader>
     <div className="admin-overview">
       <section className="admin-overview-banner"><div><p className="admin-eyebrow">SPRINT 2.6 · FOUNDATION</p><h2>One place for your catalog workflow.</h2></div><p>Modules are being prepared for future, permission-controlled connections.</p></section>

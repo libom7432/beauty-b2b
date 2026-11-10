@@ -13,7 +13,8 @@ export async function GET() {
     const session = await readAdminUISession();
     if (!session) return error(401);
     return Response.json({ adminId: session.admin.admin_id, sessionKey: session.sessionKey,
-      canReadCatalog: session.admin.permissions.includes("catalog.read") },
+      canReadCatalog: session.admin.permissions.includes("catalog.read"),
+      canReadRFQ: session.admin.permissions.includes("rfq.read") },
       { status: 200, headers });
   } catch (cause) {
     return error(cause instanceof CatalogImportError && cause.code === "PERMISSION_DENIED" ? 403 : 500);

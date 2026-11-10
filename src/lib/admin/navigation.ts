@@ -1,10 +1,10 @@
-import type { CatalogPermission } from "../catalog-import/admin-auth.ts";
+import type { AdminPermission } from "../catalog-import/admin-auth.ts";
 
 export type AdminNavItem = Readonly<{
   href: string;
   label: string;
   number: string;
-  permission?: CatalogPermission;
+  permission?: AdminPermission;
 }>;
 
 export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
@@ -14,9 +14,10 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
   { href: "/admin/collections", label: "Collections", number: "04", permission: "catalog.read" },
   { href: "/admin/media", label: "Media", number: "05", permission: "catalog.read" },
   { href: "/admin/imports", label: "Imports", number: "06", permission: "catalog.import.receipt.read" },
+  { href: "/admin/rfq", label: "RFQ Inbox", number: "07", permission: "rfq.read" },
 ];
 
-export function visibleAdminNavigation(permissions: readonly CatalogPermission[]): readonly AdminNavItem[] {
+export function visibleAdminNavigation(permissions: readonly AdminPermission[]): readonly AdminNavItem[] {
   return ADMIN_NAVIGATION.filter((item) => !item.permission || permissions.includes(item.permission));
 }
 
@@ -28,6 +29,7 @@ export function isAdminCollectionDetailPath(pathname: string): boolean {
 }
 
 export function adminRouteLabel(pathname: string): string {
+  if (/^\/admin\/rfq\/[0-9a-f-]{36}$/i.test(pathname)) return "RFQ detail";
   if (pathname.startsWith("/admin/products/")) return "Product detail";
   if (isAdminCollectionDetailPath(pathname)) return "Collection detail";
   return ADMIN_NAVIGATION.find((item) => item.href === pathname)?.label ?? "Admin";

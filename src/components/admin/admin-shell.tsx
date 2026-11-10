@@ -11,8 +11,8 @@ import { collectionSessionDirty } from "@/lib/admin/collection-draft-session";
 
 type IdentityState = { phase: "VERIFYING" | "INVALID" } |
   { phase: "VERIFIED"; routeKey: string; identityKey: string; canReadCatalog: boolean;
-    visitEpoch: number };
-type Confirmation = { kind: "VERIFIED"; key: string; canReadCatalog: boolean } |
+    canReadRFQ: boolean; visitEpoch: number };
+type Confirmation = { kind: "VERIFIED"; key: string; canReadCatalog: boolean; canReadRFQ: boolean } |
   { kind: "REJECTED" } | { kind: "UNAVAILABLE" };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const sessionHash = /^[0-9a-f]{64}$/;
@@ -21,6 +21,7 @@ const locationRouteKey = () =>
 const requiresCatalogRead = (pathname: string) => ADMIN_NAVIGATION.some((item) =>
   item.permission === "catalog.read" &&
   (pathname === item.href || pathname.startsWith(`${item.href}/`)));
+const requiresRFQRead = (pathname: string) => pathname === "/admin/rfq" || pathname.startsWith("/admin/rfq/");
 
 function SidebarContents({ items, pathname, onNavigate, onClose, closeButton }: {
   items: readonly AdminNavItem[]; pathname: string; onNavigate?: () => void;
@@ -190,10 +191,11 @@ export function AdminShell(props: { children: ReactNode; items: readonly AdminNa
   const invalidateGuard = useRef<(() => void) | null>(null);
   const invalidateCurrentGuard = useCallback(() => invalidateGuard.current?.(), []);
   const catalogRoute = requiresCatalogRead(pathname);
+  const rfqRoute = requiresRFQRead(pathname);
   const catalogDenied = catalogRoute && revokedRoute === routeKey;
   const active = identity.phase === "VERIFIED" && identity.routeKey === routeKey &&
     identity.identityKey === expectedKey && !catalogDenied &&
-    (!catalogRoute || identity.canReadCatalog);
+    (!catalogRoute || identity.canReadCatalog) && (!rfqRoute || identity.canReadRFQ);
   const draftActive = active && identity.canReadCatalog;
   const visitEpoch = identity.phase === "VERIFIED" ? identity.visitEpoch : 0;
   const authorityEpoch = owner.getAccessEpoch();
@@ -227,16 +229,24 @@ export function AdminShell(props: { children: ReactNode; items: readonly AdminNa
         const value = body as Record<string, unknown>;
         if (typeof value.adminId !== "string" || !uuid.test(value.adminId) ||
           typeof value.sessionKey !== "string" || !sessionHash.test(value.sessionKey) ||
-          typeof value.canReadCatalog !== "boolean")
+          typeof value.canReadCatalog !== "boolean" || typeof value.canReadRFQ !== "boolean")
           return { kind: "UNAVAILABLE" };
         return { kind: "VERIFIED", key: `${value.adminId}:${value.sessionKey}`,
-          canReadCatalog: value.canReadCatalog };
+          canReadCatalog: value.canReadCatalog, canReadRFQ: value.canReadRFQ };
       })
       .then((confirmation) => {
         const latestRoute = locationRouteKey();
         if (controller.signal.aborted || current !== sequence.current ||
           latestRoute !== targetRoute) return;
         if (confirmation.kind === "VERIFIED" && confirmation.key === expectedKey) {
+          if (!confirmation.canReadRFQ && requiresRFQRead(targetRoute.split("?", 1)[0])) {
+            owner.destroy();
+            revokedRouteRef.current = targetRoute;
+            setRevokedRoute(targetRoute);
+            setIdentity({ phase: "VERIFYING" });
+            router.replace("/admin?rfq=forbidden");
+            return;
+          }
           if (!confirmation.canReadCatalog) {
             owner.destroy();
             if (requiresCatalogRead(targetRoute.split("?", 1)[0])) {
@@ -262,7 +272,8 @@ export function AdminShell(props: { children: ReactNode; items: readonly AdminNa
             router.refresh();
           } else owner.unlock();
           setIdentity({ phase: "VERIFIED", routeKey: targetRoute, identityKey: confirmation.key,
-            canReadCatalog: confirmation.canReadCatalog, visitEpoch: current });
+            canReadCatalog: confirmation.canReadCatalog, canReadRFQ: confirmation.canReadRFQ,
+            visitEpoch: current });
         } else if (confirmation.kind === "REJECTED" ||
           confirmation.kind === "VERIFIED") {
           owner.destroy();
@@ -323,8 +334,9 @@ export function AdminShell(props: { children: ReactNode; items: readonly AdminNa
     active={draftActive} visitEpoch={visitEpoch}>
     <div hidden={!active} inert={!active} aria-hidden={!active}>
       {!catalogDenied && <AdminShellContents {...props}
-        items={identity.phase === "VERIFIED" && !identity.canReadCatalog
-          ? props.items.filter((item) => item.permission !== "catalog.read") : props.items}
+        items={identity.phase === "VERIFIED" ? props.items.filter((item) =>
+          (item.permission !== "catalog.read" || identity.canReadCatalog) &&
+          (item.permission !== "rfq.read" || identity.canReadRFQ)) : props.items}
         onSignOut={signOut} onSignOutFailure={verifyIdentity} />}
     </div>
     {!active && <div className="admin-identity-status" role="status">

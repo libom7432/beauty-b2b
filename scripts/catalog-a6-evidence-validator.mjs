@@ -132,7 +132,7 @@ function jsonl(bytes) {
 
 // A1 SQL returns exactly one snapshot_row column. Quoted CSV fields and doubled quotes
 // are decoded; physical newlines inside a quoted field are allowed.
-function csv(bytes) {
+function csv(bytes, header="snapshot_row") {
   const text = bytes.toString("utf8");
   if (!Buffer.from(text,"utf8").equals(bytes)) throw new Error("invalid UTF-8");
   const rows = []; let row = [], cell = "", quoted = false, endedQuote = false;
@@ -155,9 +155,10 @@ function csv(bytes) {
   }
   if (quoted) throw new Error("unterminated CSV quote");
   if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
-  if (!rows.length || rows[0].length !== 1 || rows[0][0] !== "snapshot_row" ||
+  if (!rows.length || rows[0].length !== 1 || rows[0][0] !== header ||
       rows.slice(1).some((r) => r.length !== 1 || !r[0])) throw new Error("CSV schema invalid");
-  return rows.slice(1).map((r) => parseUniqueJson(Buffer.from(r[0],"utf8")));
+  return rows.slice(1).map((r) => header === "snapshot_row" ?
+    parseUniqueJson(Buffer.from(r[0],"utf8")) : r[0]);
 }
 
 function exactKeys(value, expected) {
@@ -622,6 +623,225 @@ export async function validateCatalogA6Evidence(bundleDirectory, policyFile, exp
       error instanceof DuplicateJsonKeyError ? "duplicate object key" : String(error.message));
     return result(findings);
   }
+}
+
+// Separate version-only artifact. The A1 snapshot bundle and its one-query contract
+// stay unchanged. This result establishes byte/structure consistency, never source trust.
+export async function validateCatalogA6MigrationHistory({snapshotBundleDirectory,
+  snapshotPolicyFile,expectedSnapshotPolicySha256,historyBundleDirectory,
+  historyPolicyFile,expectedHistoryPolicySha256,stage,adminIdentity}={}) {
+  const findings=[], add=(code,detail) => findings.push(issue(code,detail));
+  const finish=() => ({internalConsistency:findings.length ?
+    "INTERNAL_CONSISTENCY_BLOCKED" : "INTERNAL_CONSISTENCY_PASS",
+    sourceAuthentication:"SOURCE_AUTHENTICATION_UNVERIFIED",
+    rawExportCompleteness:"RAW_EXPORT_COMPLETENESS_UNVERIFIED",
+    migrationVersions:findings.length ? null : versions,
+    binding:findings.length ? null : binding,findings});
+  let versions=null, binding=null;
+  if (!["empty","foundation","admin-read"].includes(stage) ||
+      !["absent","present"].includes(adminIdentity) ||
+      (stage === "empty" && adminIdentity !== "absent")) {
+    add("HISTORY_STAGE_INVALID","explicit Catalog-only stage and admin identity required");
+    return finish();
+  }
+  if (!isHash(expectedSnapshotPolicySha256) || !isHash(expectedHistoryPolicySha256)) {
+    add("HISTORY_ANCHOR_MISSING","two independent policy hashes required");
+    return finish();
+  }
+  try {
+    const historyRootStat=await lstat(historyBundleDirectory,{bigint:true});
+    if (!historyRootStat.isDirectory() || historyRootStat.isSymbolicLink()) {
+      add("HISTORY_BUNDLE_INVALID","ordinary directory required"); return finish();
+    }
+    const snapshotRoot=await realpath(snapshotBundleDirectory);
+    const historyRoot=await realpath(historyBundleDirectory);
+    if (!sameFile(historyRootStat,await lstat(historyRoot,{bigint:true}))) {
+      add("HISTORY_BUNDLE_CHANGED","history root changed"); return finish();
+    }
+    if (snapshotRoot === historyRoot) { add("HISTORY_NOT_INDEPENDENT","separate bundles required"); return finish(); }
+    const historyPolicyReal=await realpath(historyPolicyFile);
+    const relative=path.relative(historyRoot,historyPolicyReal);
+    if (relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".."))
+      add("HISTORY_POLICY_NOT_INDEPENDENT","policy must be outside history bundle");
+    const snapManifestBefore=await readStableBundleFile(snapshotRoot,"manifest.json");
+    const snapshot=await validateCatalogA6Evidence(snapshotBundleDirectory,snapshotPolicyFile,
+      expectedSnapshotPolicySha256);
+    if (snapshot.internalConsistency !== "INTERNAL_CONSISTENCY_PASS") {
+      add("SNAPSHOT_EVIDENCE_BLOCKED","A1/B1 snapshot evidence did not pass");
+      return finish();
+    }
+    const snapManifestBytes=await readStableBundleFile(snapshotRoot,"manifest.json");
+    if (!snapManifestBefore.equals(snapManifestBytes)) {
+      add("SNAPSHOT_CHANGED","snapshot manifest changed during B1"); return finish();
+    }
+    const snapManifest=parseUniqueJson(snapManifestBytes);
+    const snapEntry=snapManifest?.queries?.[0];
+    if (snapManifest?.queries?.length !== 1 || snapEntry?.id !== "snapshot" ||
+        !pathOK(snapEntry.jsonlFile,"exports","jsonl") || !isHash(snapEntry.jsonlSha256)) {
+      add("SNAPSHOT_BINDING_INVALID","snapshot manifest mapping"); return finish();
+    }
+    const snapRowsBytes=await readStableBundleFile(snapshotRoot,snapEntry.jsonlFile);
+    if (hash(snapRowsBytes) !== snapEntry.jsonlSha256) {
+      add("SNAPSHOT_CHANGED","snapshot changed after B1"); return finish();
+    }
+    const snapshotRows=jsonl(snapRowsBytes);
+    const registry=snapshotRows.filter((r) => r.section === "migration_registry" &&
+      r.item === "supabase_migrations.schema_migrations");
+    if (registry.length !== 1 || typeof registry[0].data?.exists !== "boolean" ||
+        (stage === "empty" ? registry[0].data.exists !== false : registry[0].data.exists !== true))
+      add("HISTORY_REGISTRY_STAGE_MISMATCH","registry existence / stage");
+    const snapPolicyBytes=await readStableBundleFile(path.dirname(path.resolve(snapshotPolicyFile)),
+      path.basename(snapshotPolicyFile));
+    if (hash(snapPolicyBytes) !== expectedSnapshotPolicySha256)
+      add("SNAPSHOT_POLICY_CHANGED","snapshot policy after B1");
+    const snapPolicy=parseUniqueJson(snapPolicyBytes);
+    const historyPolicyBytes=await readStableBundleFile(path.dirname(path.resolve(historyPolicyFile)),
+      path.basename(historyPolicyFile));
+    if (hash(historyPolicyBytes) !== expectedHistoryPolicySha256)
+      add("HISTORY_POLICY_HASH_MISMATCH","independent history policy anchor");
+    const policy=parseUniqueJson(historyPolicyBytes);
+    const targetKeys=["kind","projectRef","databaseName","postgresVersion","identity","queries"];
+    if (!exactKeys(policy,targetKeys) || policy.kind !== "CATALOG_A6_HISTORY_POLICY_V1" ||
+        !ref(policy.projectRef) || !nonempty(policy.databaseName) ||
+        !nonempty(policy.postgresVersion) ||
+        !exactKeys(policy.identity,["operator","currentUser","sessionUser"]) ||
+        Object.values(policy.identity).some((v) => !nonempty(v)) ||
+        !Array.isArray(policy.queries) || policy.queries.length !== 1 ||
+        !exactKeys(policy.queries[0],["id","version","sqlSha256"]) ||
+        policy.queries[0].id !== "migration_history" ||
+        policy.queries[0].version !== "catalog-a6-migration-history-v1" ||
+        !isHash(policy.queries[0].sqlSha256))
+      add("HISTORY_POLICY_INVALID","one approved version-only query required");
+    if (policy.projectRef !== snapPolicy.projectRef ||
+        policy.databaseName !== snapPolicy.databaseName ||
+        policy.postgresVersion !== snapPolicy.postgresVersion ||
+        !isDeepStrictEqual(policy.identity,snapPolicy.identity))
+      add("HISTORY_TARGET_MISMATCH","history / snapshot target and identity");
+    const manifestBytes=await readStableBundleFile(historyRoot,"manifest.json");
+    const manifest=parseUniqueJson(manifestBytes);
+    const manifestKeys=["kind","projectRef","databaseName","postgresVersion",
+      "snapshotManifestSha256","snapshotJsonlSha256","queries"];
+    if (!exactKeys(manifest,manifestKeys) ||
+        manifest.kind !== "CATALOG_A6_HISTORY_BUNDLE_V1" ||
+        manifest.projectRef !== policy.projectRef ||
+        manifest.databaseName !== policy.databaseName ||
+        manifest.postgresVersion !== policy.postgresVersion ||
+        manifest.snapshotManifestSha256 !== hash(snapManifestBytes) ||
+        manifest.snapshotJsonlSha256 !== snapEntry.jsonlSha256 ||
+        !Array.isArray(manifest.queries) || manifest.queries.length !== 1)
+      add("HISTORY_MANIFEST_INVALID","target or snapshot binding");
+    if (findings.length) return finish();
+    const entry=manifest.queries[0];
+    const entryKeys=["id","version","approvedSqlFile","approvedSqlSha256","recordFile",
+      "recordSha256","rawExportFile","rawExportSha256","jsonlFile","jsonlSha256",
+      "rowCount","columns","truncated","exportId"];
+    if (!exactKeys(entry,entryKeys) || entry.id !== policy.queries[0].id ||
+        entry.version !== policy.queries[0].version ||
+        entry.approvedSqlSha256 !== policy.queries[0].sqlSha256 ||
+        !isHash(entry.recordSha256) || !isHash(entry.rawExportSha256) ||
+        !isHash(entry.jsonlSha256) ||
+        !pathOK(entry.approvedSqlFile,"approved","sql") ||
+        !pathOK(entry.recordFile,"records","json") ||
+        !pathOK(entry.rawExportFile,"raw","csv") ||
+        !pathOK(entry.jsonlFile,"exports","jsonl") ||
+        !count(entry.rowCount) || !isDeepStrictEqual(entry.columns,["version"]) ||
+        entry.truncated !== false || !nonempty(entry.exportId)) {
+      add("HISTORY_ENTRY_INVALID","query file map or version column"); return finish();
+    }
+    const rootNames=await readdir(historyRoot);
+    if (!isDeepStrictEqual(rootNames.sort(),
+      ["manifest.json","approved","records","raw","exports"].sort()))
+      add("HISTORY_INVENTORY_INVALID","unexpected root file or missing directory");
+    const [sqlMap,recordMap,rawMap,jsonlMap]=await Promise.all([
+      inventory(historyRoot,"approved",new Set([entry.approvedSqlFile]),add),
+      inventory(historyRoot,"records",new Set([entry.recordFile]),add),
+      inventory(historyRoot,"raw",new Set([entry.rawExportFile]),add),
+      inventory(historyRoot,"exports",new Set([entry.jsonlFile]),add)]);
+    const sqlBytes=sqlMap.get(entry.approvedSqlFile),recordBytes=recordMap.get(entry.recordFile);
+    const rawBytes=rawMap.get(entry.rawExportFile),jsonlBytes=jsonlMap.get(entry.jsonlFile);
+    if (!sqlBytes || !recordBytes || !rawBytes || !jsonlBytes) return finish();
+    for (const [bytes,digest,label] of [[sqlBytes,entry.approvedSqlSha256,"SQL"],
+      [recordBytes,entry.recordSha256,"RECORD"],[rawBytes,entry.rawExportSha256,"RAW"],
+      [jsonlBytes,entry.jsonlSha256,"JSONL"]])
+      if (hash(bytes) !== digest) add(`HISTORY_${label}_HASH_MISMATCH`,label);
+    const record=parseUniqueJson(recordBytes);
+    const recordKeys=["queryId","executionId","projectRef","databaseName",
+      "postgresVersion","operator","currentUser","sessionUser","executedAtUtc",
+      "success","sqlVersion","executedSql","executedSqlSha256","rawExportFile",
+      "rawExportSha256","jsonlFile","jsonlSha256","rowCount","columns","truncated",
+      "exportId","snapshotManifestSha256","snapshotJsonlSha256"];
+    if (!exactKeys(record,recordKeys) || !nonempty(record.executionId) ||
+        !utc(record.executedAtUtc) || record.success !== true ||
+        record.truncated !== false || record.queryId !== entry.id ||
+        record.sqlVersion !== entry.version || record.projectRef !== policy.projectRef ||
+        record.databaseName !== policy.databaseName ||
+        record.postgresVersion !== policy.postgresVersion ||
+        record.operator !== policy.identity.operator ||
+        record.currentUser !== policy.identity.currentUser ||
+        record.sessionUser !== policy.identity.sessionUser ||
+        record.rawExportFile !== entry.rawExportFile ||
+        record.rawExportSha256 !== entry.rawExportSha256 ||
+        record.jsonlFile !== entry.jsonlFile ||
+        record.jsonlSha256 !== entry.jsonlSha256 ||
+        record.rowCount !== entry.rowCount ||
+        !isDeepStrictEqual(record.columns,entry.columns) ||
+        record.exportId !== entry.exportId ||
+        record.snapshotManifestSha256 !== manifest.snapshotManifestSha256 ||
+        record.snapshotJsonlSha256 !== manifest.snapshotJsonlSha256 ||
+        record.executedSqlSha256 !== entry.approvedSqlSha256 ||
+        typeof record.executedSql !== "string" ||
+        hash(Buffer.from(record.executedSql ?? "","utf8")) !== entry.approvedSqlSha256 ||
+        !sqlBytes.equals(Buffer.from(record.executedSql ?? "","utf8")))
+      add("HISTORY_RECORD_INVALID","execution, target, files or SQL mismatch");
+    const rawVersions=csv(rawBytes,"version");
+    const text=jsonlBytes.toString("utf8");
+    if (!Buffer.from(text,"utf8").equals(jsonlBytes))
+      add("HISTORY_JSONL_INVALID","invalid UTF-8");
+    const lines=text === "" ? [] : text.endsWith("\n") ? text.slice(0,-1).split("\n") :
+      text.split("\n");
+    if (lines.some((line) => !line || line.includes("\r")))
+      add("HISTORY_JSONL_INVALID","noncanonical JSONL");
+    const parsed=lines.map((line) => parseUniqueJson(Buffer.from(line,"utf8")));
+    if (parsed.some((r) => !exactKeys(r,["version"]) ||
+        typeof r.version !== "string" || !/^\d{14}$/.test(r.version)))
+      add("HISTORY_VERSION_INVALID","version-only rows require 14 digits");
+    if (rawVersions.some((v) => !/^\d{14}$/.test(v)))
+      add("HISTORY_VERSION_INVALID","raw version format");
+    if (new Set(rawVersions).size !== rawVersions.length ||
+        new Set(parsed.map((r) => r.version)).size !== parsed.length)
+      add("HISTORY_DUPLICATE_VERSION","duplicate version");
+    if (rawVersions.length !== entry.rowCount || parsed.length !== entry.rowCount ||
+        !isDeepStrictEqual(rawVersions,parsed.map((r) => r.version)))
+      add("HISTORY_CONVERSION_MISMATCH","CSV, JSONL and manifest row count/order");
+    const expected=stage === "empty" ? [] : ["20261013120000",
+      ...(adminIdentity === "present" ? ["20261018120000"] : []),
+      ...(stage === "admin-read" ? ["20261020120000"] : [])];
+    if (!isDeepStrictEqual([...rawVersions].sort(),[...expected].sort()))
+      add("HISTORY_STAGE_MISMATCH","version set / stage and admin identity");
+    const reread=await Promise.all([readStableBundleFile(historyRoot,"manifest.json"),
+      readStableBundleFile(historyRoot,entry.approvedSqlFile),
+      readStableBundleFile(historyRoot,entry.recordFile),
+      readStableBundleFile(historyRoot,entry.rawExportFile),
+      readStableBundleFile(historyRoot,entry.jsonlFile),
+      readStableBundleFile(snapshotRoot,"manifest.json"),
+      readStableBundleFile(snapshotRoot,snapEntry.jsonlFile),
+      readStableBundleFile(path.dirname(path.resolve(historyPolicyFile)),
+        path.basename(historyPolicyFile)),
+      readStableBundleFile(path.dirname(path.resolve(snapshotPolicyFile)),
+        path.basename(snapshotPolicyFile))]);
+    if (![manifestBytes,sqlBytes,recordBytes,rawBytes,jsonlBytes,
+      snapManifestBytes,snapRowsBytes,historyPolicyBytes,snapPolicyBytes]
+      .every((bytes,i) => bytes.equals(reread[i])))
+      add("HISTORY_EVIDENCE_CHANGED","files changed during validation");
+    if (findings.length) return finish();
+    versions=rawVersions;
+    binding={snapshotManifestSha256:hash(snapManifestBytes),
+      snapshotJsonlSha256:snapEntry.jsonlSha256,historyManifestSha256:hash(manifestBytes),
+      historyRawSha256:entry.rawExportSha256,historyJsonlSha256:entry.jsonlSha256,
+      historyPolicySha256:expectedHistoryPolicySha256,executionId:record.executionId,
+      exportId:entry.exportId,stage,adminIdentity};
+    return finish();
+  } catch (error) { add("HISTORY_EVIDENCE_ERROR",error.message); return finish(); }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

@@ -1,12 +1,13 @@
 // Synthetic A6 integration tests. All writes go to OS temporary directories.
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, unlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { SECTIONS } from "./catalog-a6-evidence-validator.mjs";
-import { approvalMessage, baselineContent, canonicalJson } from "./catalog-a6-security-validator.mjs";
+import { approvalMessage, baselineContent, canonicalJson,
+  validateCatalogA6Security } from "./catalog-a6-security-validator.mjs";
 import { validateCatalogA6Pipeline } from "./catalog-a6-validation-pipeline.mjs";
 
 const sha = (x) => createHash("sha256").update(x).digest("hex");
@@ -56,7 +57,28 @@ function permissions() {
     privilegedSetRolePaths:[],
   };
 }
-const oid = {postgres:"10",normal:"11",unapproved:"12"};
+function emptyPermissions() {
+  const p=permissions();
+  p.roles=[{...p.roles[0],superuser:false,createDb:false,createRole:false,
+    bypassRls:false},...[
+    ["anon",false],["authenticated",false],["service_role",false],["authenticator",true],
+  ].map(([name,login]) => ({name,connectionLimit:-1,superuser:false,createDb:false,
+    createRole:false,login,replication:false,bypassRls:false,inherit:false}))];
+  p.memberships=[];
+  p.schemas=[p.schemas[0],...["catalog_private","catalog_public","rfq_private",
+    "admin_private"].map((name) => ({name,exists:false,owner:null,aclIsNull:null,
+    aclSource:"ABSENT"}))];
+  p.publicSchemas=[p.publicSchemas[0],...p.schemas.slice(1).map((s) => ({name:s.name,
+    exists:false,usage:null,create:null,aclSource:"ABSENT"}))];
+  p.effectiveDatabase=p.roles.map((r) => ({role:r.name,roleExists:true,
+    connect:true,create:r.name === "postgres",temp:false}));
+  p.effectiveSchema=p.roles.flatMap((r) => p.schemas.map((s) => ({role:r.name,
+    schema:s.name,roleExists:true,schemaExists:s.exists,
+    usage:s.exists ? true : null,create:s.exists ? r.name === "postgres" : null})));
+  return p;
+}
+const oid = {postgres:"10",normal:"11",unapproved:"12",anon:"20",authenticated:"21",
+  service_role:"22",authenticator:"23"};
 function baseRows(p) {
   const rows = [
     row("database","postgres",{name:"postgres",server_version:"17.11",database_oid:"5",
@@ -83,6 +105,12 @@ function baseRows(p) {
       project_ref_source:"EXTERNAL_DASHBOARD_EVIDENCE_REQUIRED",
       raw_export_completeness:"UNVERIFIED",execution_provenance:"UNVERIFIED"}),
   ];
+  for (const s of p.schemas.slice(1)) rows.push(
+    row("schema",s.name,{exists:s.exists,schema_oid:null,owner_oid:null,owner:null}),
+    row("schema_acl_state",s.name,{schema:s.name,schema_oid:null,exists:false,
+      owner_oid:null,acl_is_null:null,acl_source:"ABSENT",explicit_acl_entry_count:null}),
+    row("public_schema_privilege",s.name,{schema:s.name,schema_oid:null,exists:false,
+      acl_source:"ABSENT",usage:null,create:null}));
   p.roles.forEach((r) => rows.push(row("role",r.name,{role_name:r.name,role_oid:oid[r.name],
     connection_limit:r.connectionLimit,login:r.login,inherit:r.inherit,superuser:r.superuser,
     bypass_rls:r.bypassRls,create_db:r.createDb,create_role:r.createRole,
@@ -111,7 +139,7 @@ function baseRows(p) {
     role:x.role,role_oid:oid[x.role],role_exists:x.roleExists,
     connect:x.connect,create:x.create,temp:x.temp})));
   p.effectiveSchema.forEach((x) => rows.push(row("effective_schema",`${x.role}:${x.schema}`,{
-    role:x.role,schema:x.schema,role_oid:oid[x.role],schema_oid:"2200",
+    role:x.role,schema:x.schema,role_oid:oid[x.role],schema_oid:x.schemaExists ? "2200" : null,
     role_exists:x.roleExists,schema_exists:x.schemaExists,usage:x.usage,create:x.create})));
   return rows;
 }
@@ -140,14 +168,13 @@ function baseline(p,status="SYNTHETIC_APPROVED") {
   b.approval.signatureBase64 = sign(null,approvalMessage(b),privateKey).toString("base64");
   return Buffer.from(JSON.stringify(b));
 }
-async function fixture(t) {
+async function fixture(t,p=permissions()) {
   const temp = await mkdtemp(path.join(tmpdir(),"catalog-a6-pipeline-"));
   t.after(() => rm(temp,{recursive:true,force:true}));
   const bundle = path.join(temp,"bundle"), policyFile = path.join(temp,"policy.json"),
     baselineFile = path.join(temp,"baseline.json");
   for (const dir of ["approved","records","raw","exports"])
     await mkdir(path.join(bundle,dir),{recursive:true});
-  const p = permissions();
   const f = {temp,bundle,policyFile,baselineFile,rows:baseRows(p),
     baselineStatus:"SYNTHETIC_APPROVED",baselineBytes:null,
     policy:{kind:"CATALOG_A6_EVIDENCE_POLICY_V1",projectRef:ref,databaseName:"postgres",
@@ -189,16 +216,75 @@ async function fixture(t) {
       writeFile(path.join(bundle,"raw/snapshot.csv"),rawBytes),
       writeFile(path.join(bundle,"exports/snapshot.jsonl"),jsonlBytes),
     ]);
+    if (f.commitHistory) await f.commitHistory();
   };
   f.options = (mode="synthetic") => ({bundleDirectory:bundle,policyFile,
     expectedPolicySha256:f.policyAnchor,baselineFile,expectedBaselineSha256:f.baselineAnchor,
     trustedTarget:{projectRef:ref,databaseName:"postgres",postgresVersion:"17.11"},
     approvalTrust:{trustedApprovalPublicKeyPem:keyPem,trustedSignerKeyId:"synthetic-key-1",
-      trustedApprovalRecordRef:"synthetic://approval/1"},mode});
+      trustedApprovalRecordRef:"synthetic://approval/1"},mode,
+    ...(f.historyBundle ? {historyBundleDirectory:f.historyBundle,
+      historyPolicyFile:f.historyPolicyFile,
+      expectedHistoryPolicySha256:f.historyPolicySha256,
+      stage:f.stage,adminIdentity:f.adminIdentity} : {})});
   await f.commit();
   return f;
 }
+async function addHistory(f,{stage="empty",adminIdentity="absent",versions=[]}={}) {
+  f.stage=stage; f.adminIdentity=adminIdentity; f.historyVersions=versions;
+  f.historyBundle=path.join(f.temp,"history");
+  f.historyPolicyFile=path.join(f.temp,"history-policy.json");
+  for (const dir of ["approved","records","raw","exports"])
+    await mkdir(path.join(f.historyBundle,dir),{recursive:true});
+  f.commitHistory=async () => {
+    const historySql="SELECT version FROM supabase_migrations.schema_migrations ORDER BY version;\n";
+    const raw=`version\n${f.historyVersions.map((v) => `${v}\n`).join("")}`;
+    const converted=f.historyVersions.map((v) => JSON.stringify({version:v})+"\n").join("");
+    const snapshotManifest=await readFile(path.join(f.bundle,"manifest.json"));
+    const snapshotJsonl=await readFile(path.join(f.bundle,"exports/snapshot.jsonl"));
+    const policy={kind:"CATALOG_A6_HISTORY_POLICY_V1",projectRef:ref,
+      databaseName:"postgres",postgresVersion:"17.11",identity:f.policy.identity,
+      queries:[{id:"migration_history",version:"catalog-a6-migration-history-v1",
+        sqlSha256:sha(historySql)}]};
+    const entry={id:"migration_history",version:"catalog-a6-migration-history-v1",
+      approvedSqlFile:"approved/history.sql",approvedSqlSha256:sha(historySql),
+      recordFile:"records/history.json",recordSha256:"",rawExportFile:"raw/history.csv",
+      rawExportSha256:sha(raw),jsonlFile:"exports/history.jsonl",jsonlSha256:sha(converted),
+      rowCount:f.historyVersions.length,columns:["version"],truncated:false,
+      exportId:"SYNTHETIC-history-export"};
+    const manifest={kind:"CATALOG_A6_HISTORY_BUNDLE_V1",projectRef:ref,
+      databaseName:"postgres",postgresVersion:"17.11",
+      snapshotManifestSha256:sha(snapshotManifest),snapshotJsonlSha256:sha(snapshotJsonl),
+      queries:[entry]};
+    const record={queryId:entry.id,executionId:"SYNTHETIC-history-execution",
+      projectRef:ref,databaseName:"postgres",postgresVersion:"17.11",
+      operator:f.policy.identity.operator,currentUser:"postgres",sessionUser:"postgres",
+      executedAtUtc:"2026-11-09T03:49:32.000Z",success:true,sqlVersion:entry.version,
+      executedSql:historySql,executedSqlSha256:sha(historySql),
+      rawExportFile:entry.rawExportFile,rawExportSha256:entry.rawExportSha256,
+      jsonlFile:entry.jsonlFile,jsonlSha256:entry.jsonlSha256,
+      rowCount:entry.rowCount,columns:entry.columns,truncated:false,exportId:entry.exportId,
+      snapshotManifestSha256:manifest.snapshotManifestSha256,
+      snapshotJsonlSha256:manifest.snapshotJsonlSha256};
+    const recordBytes=Buffer.from(JSON.stringify(record)); entry.recordSha256=sha(recordBytes);
+    const policyBytes=Buffer.from(JSON.stringify(policy)); f.historyPolicySha256=sha(policyBytes);
+    await Promise.all([writeFile(f.historyPolicyFile,policyBytes),
+      writeFile(path.join(f.historyBundle,"manifest.json"),JSON.stringify(manifest)),
+      writeFile(path.join(f.historyBundle,entry.approvedSqlFile),historySql),
+      writeFile(path.join(f.historyBundle,entry.recordFile),recordBytes),
+      writeFile(path.join(f.historyBundle,entry.rawExportFile),raw),
+      writeFile(path.join(f.historyBundle,entry.jsonlFile),converted)]);
+  };
+  await f.commitHistory();
+  return f;
+}
 const run = (f,mode) => validateCatalogA6Pipeline(f.options(mode));
+async function runCounted(f,overrides={}) {
+  let c1Calls=0;
+  const out=await validateCatalogA6Pipeline({...f.options(),...overrides,
+    onSecurityValidationForTest:() => { c1Calls++; }});
+  return {out,c1Calls};
+}
 async function blockedTest(t,mutate,code) {
   const f = await fixture(t);
   await mutate(f);
@@ -206,6 +292,21 @@ async function blockedTest(t,mutate,code) {
   assert.equal(out.overallStatus,"BLOCKED",JSON.stringify(out));
   assert.equal(out.sourceAuthenticationStatus,"SOURCE_AUTHENTICATION_UNVERIFIED");
   if (code) assert.ok(out.reasonCodes.includes(code),JSON.stringify(out));
+}
+async function blockedSecurityTest(t,mutate,code) {
+  const f=await fixture(t);
+  await mutate(f);
+  const options=f.options();
+  const direct=validateCatalogA6Security(f.rows,f.baselineBytes,f.baselineAnchor,{
+    ...options.approvalTrust,mode:"synthetic",expectedProjectRef:ref,
+    expectedDatabaseName:"postgres",expectedPostgresVersion:"17.11"});
+  assert.ok(direct.security.findings.some((finding) => finding.code === code),
+    JSON.stringify(direct));
+  const {out,c1Calls}=await runCounted(f);
+  assert.equal(c1Calls,0,"D1 cannot call C1 without verified history and legacy PASS");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+  assert.equal(out.overallStatus,"BLOCKED");
 }
 function assertSecurityNotRun(out,code,stage="EVIDENCE_VALIDATION") {
   assert.equal(out.evidenceStatus,"INTERNAL_CONSISTENCY_BLOCKED",JSON.stringify(out));
@@ -217,15 +318,188 @@ function assertSecurityNotRun(out,code,stage="EVIDENCE_VALIDATION") {
   assert.ok(out.reasonCodes.includes(code),JSON.stringify(out));
 }
 
-test("complete SYNTHETIC B1 and C1 path never yields formal overall PASS",async (t) => {
+test("old B1 and C1 fixture without history is now fail-closed",async (t) => {
   const f = await fixture(t);
-  const out = await run(f);
+  const {out,c1Calls}=await runCounted(f);
   assert.equal(out.evidenceStatus,"INTERNAL_CONSISTENCY_PASS",JSON.stringify(out));
-  assert.equal(out.baselineApprovalStatus,"SYNTHETIC_VERIFIED");
-  assert.equal(out.securityStatus,"SYNTHETIC_PASS");
-  assert.equal(out.overallStatus,"SYNTHETIC_MATCH_ONLY");
+  assert.equal(c1Calls,0);
+  assert.equal(out.baselineApprovalStatus,"BLOCKED");
+  assert.equal(out.securityStatus,"BLOCKED");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+  assert.equal(out.overallStatus,"BLOCKED");
   assert.equal(out.rawExportCompletenessStatus,"RAW_EXPORT_COMPLETENESS_UNVERIFIED");
-  assert.equal(out.legacyCheckerStatus,"NOT_INTEGRATED");
+  assert.equal(out.historyStatus,"BLOCKED");
+  assert.equal(out.legacyCheckerStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("HISTORY_EVIDENCE_MISSING"));
+});
+test("complete local synthetic snapshot, history, legacy and C1 path",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const {out,c1Calls}=await runCounted(f);
+  assert.equal(c1Calls,1);
+  assert.equal(out.evidenceStatus,"INTERNAL_CONSISTENCY_PASS",JSON.stringify(out));
+  assert.equal(out.historyStatus,"PASS",JSON.stringify(out));
+  assert.equal(out.legacyCheckerStatus,"PASS",JSON.stringify(out));
+  assert.equal(out.securityStatus,"SYNTHETIC_PASS",JSON.stringify(out));
+  assert.equal(out.overallStatus,"SYNTHETIC_MATCH_ONLY",JSON.stringify(out));
+  assert.equal(out.sourceAuthenticationStatus,"SOURCE_AUTHENTICATION_UNVERIFIED");
+  assert.equal(out.rawExportCompletenessStatus,"RAW_EXPORT_COMPLETENESS_UNVERIFIED");
+});
+test("complete local match remains BLOCKED in formal mode",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const out=await run(f,"formal");
+  assert.equal(out.historyStatus,"PASS",JSON.stringify(out));
+  assert.equal(out.legacyCheckerStatus,"PASS",JSON.stringify(out));
+  assert.equal(out.overallStatus,"BLOCKED");
+  assert.notEqual(out.securityStatus,"SYNTHETIC_PASS");
+});
+test("history raw hash mismatch blocks whole pipeline",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  await writeFile(path.join(f.historyBundle,"raw/history.csv"),
+    "version\n20261013120000\n");
+  const {out,c1Calls}=await runCounted(f);
+  assert.equal(c1Calls,0);
+  assert.equal(out.historyStatus,"BLOCKED");
+  assert.equal(out.legacyCheckerStatus,"NOT_RUN");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+  assert.equal(out.overallStatus,"BLOCKED");
+  assert.ok(out.reasonCodes.includes("HISTORY_RAW_HASH_MISMATCH"));
+});
+test("history file missing blocks whole pipeline",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  await unlink(path.join(f.historyBundle,"raw/history.csv"));
+  let c1Calls=0;
+  const out=await validateCatalogA6Pipeline({...f.options(),
+    onSecurityValidationForTest:() => { c1Calls++; }});
+  assert.equal(out.historyStatus,"BLOCKED");
+  assert.equal(out.legacyCheckerStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("DECLARED_FILE_MISSING"));
+  assert.equal(c1Calls,0,"C1 must not run after B1 history rejection");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+  assert.equal(out.overallStatus,"BLOCKED");
+});
+test("history Manifest cannot bind another snapshot",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const file=path.join(f.historyBundle,"manifest.json");
+  const manifest=JSON.parse(await readFile(file,"utf8"));
+  manifest.snapshotJsonlSha256="0".repeat(64);
+  await writeFile(file,JSON.stringify(manifest));
+  const {out,c1Calls}=await runCounted(f);
+  assert.equal(c1Calls,0);
+  assert.equal(out.historyStatus,"BLOCKED");
+  assert.equal(out.legacyCheckerStatus,"NOT_RUN");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+  assert.ok(out.reasonCodes.includes("HISTORY_MANIFEST_INVALID"));
+  assert.equal(out.overallStatus,"BLOCKED");
+});
+test("history replacement after adapter blocks before C1",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const {out,c1Calls}=await runCounted(f,{
+    afterLegacyValidationForTest:async () => writeFile(
+      path.join(f.historyBundle,"raw/history.csv"),"version\n20261013120000\n")});
+  assert.equal(c1Calls,0);
+  assert.equal(out.historyStatus,"BLOCKED");
+  assert.equal(out.legacyCheckerStatus,"BLOCKED");
+  assert.equal(out.failureStage,"HISTORY_REREAD");
+  assert.ok(out.reasonCodes.includes("HISTORY_CHANGED"));
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+  assert.equal(out.overallStatus,"BLOCKED");
+});
+test("history disappears after adapter and C1 is not run",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const {out,c1Calls}=await runCounted(f,{
+    afterLegacyValidationForTest:async () => unlink(
+      path.join(f.historyBundle,"raw/history.csv"))});
+  assert.equal(c1Calls,0);
+  assert.equal(out.historyStatus,"BLOCKED");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("HISTORY_CHANGED"));
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+});
+test("snapshot changes after adapter and C1 is not run",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const out=await validateCatalogA6Pipeline({...f.options(),
+    afterLegacyValidationForTest:async () => writeFile(
+      path.join(f.bundle,"exports/snapshot.jsonl"),"{}\n")});
+  assert.equal(out.failureStage,"EVIDENCE_REREAD");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("EVIDENCE_CHANGED"));
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+});
+test("snapshot manifest disappears after B1 and stays EVIDENCE_REREAD",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const out=await validateCatalogA6Pipeline({...f.options(),
+    afterEvidenceValidationForTest:async () => unlink(
+      path.join(f.bundle,"manifest.json"))});
+  assert.equal(out.failureStage,"EVIDENCE_REREAD");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("EVIDENCE_CHANGED"));
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+});
+test("history mutation hook is rejected in formal mode",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const out=await validateCatalogA6Pipeline({...f.options("formal"),
+    afterLegacyValidationForTest:async () => {}});
+  assert.equal(out.overallStatus,"BLOCKED");
+  assert.ok(out.reasonCodes.includes("PIPELINE_INPUT_INVALID"));
+});
+test("caller-supplied version array cannot bypass evidence",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const out=await validateCatalogA6Pipeline({...f.options(),migrationVersions:[]});
+  assert.equal(out.overallStatus,"BLOCKED");
+  assert.ok(out.reasonCodes.includes("CALLER_HISTORY_FORBIDDEN"));
+});
+test("stage and Admin Identity mismatch block before old PASS",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()));
+  const {out,c1Calls}=await runCounted(f,{stage:"foundation",
+    adminIdentity:"present"});
+  assert.equal(c1Calls,0);
+  assert.equal(out.historyStatus,"BLOCKED");
+  assert.equal(out.legacyCheckerStatus,"NOT_RUN");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+  assert.equal(out.overallStatus,"BLOCKED");
+});
+test("old rule BLOCK prevents C1 invocation",async (t) => {
+  const f=await addHistory(await fixture(t));
+  const {out,c1Calls}=await runCounted(f);
+  assert.equal(c1Calls,0);
+  assert.equal(out.historyStatus,"PASS");
+  assert.equal(out.legacyCheckerStatus,"BLOCKED");
+  assert.equal(out.securityStatus,"BLOCKED");
+  assert.equal(out.securityRunStatus,"NOT_RUN");
+  assert.ok(out.reasonCodes.includes("SECURITY_NOT_RUN"));
+  assert.equal(out.overallStatus,"BLOCKED");
+});
+test("old rule PASS cannot overwrite C1 baseline BLOCKED",async (t) => {
+  const p=emptyPermissions(),f=await addHistory(await fixture(t,p));
+  f.baselineBytes=baseline(p,"PENDING"); await f.commit();
+  const {out,c1Calls}=await runCounted(f);
+  assert.equal(c1Calls,1);
+  assert.equal(out.historyStatus,"PASS",JSON.stringify(out));
+  assert.equal(out.legacyCheckerStatus,"PASS",JSON.stringify(out));
+  assert.equal(out.securityStatus,"BLOCKED");
+  assert.equal(out.securityRunStatus,"BLOCKED");
+  assert.equal(out.overallStatus,"BLOCKED");
+});
+test("old checker exception remains fail-closed",async (t) => {
+  const f=await addHistory(await fixture(t,emptyPermissions()),{
+    stage:"foundation",versions:["20261013120000"]});
+  f.rows.find((r) => r.section === "migration_registry").data.exists=true;
+  f.rows.push(row("policy","catalog_private.products.catalog_admin_all_products",{
+    command:"*",permissive:true,roles:{},using_true:true,
+    using_mentions_published:false,check_true:true,using_md5:null,check_md5:null}));
+  await f.commit();
+  const {out,c1Calls}=await runCounted(f);
+  assert.equal(c1Calls,0);
+  assert.equal(out.overallStatus,"BLOCKED");
+  assert.equal(out.legacyCheckerStatus,"NOT_RUN");
+  assert.equal(out.failureStage,"LEGACY_VALIDATION");
+  assert.ok(out.reasonCodes.includes("ADAPTER_ERROR"),JSON.stringify(out));
 });
 test("formal mode remains BLOCKED despite matching synthetic data",async (t) => {
   const out = await run(await fixture(t),"formal");
@@ -296,15 +570,15 @@ test("raw CSV hash mismatch blocks",(t) => blockedTest(t,async (f) => {
 test("JSONL hash mismatch blocks",(t) => blockedTest(t,async (f) => {
   await writeFile(path.join(f.bundle,"exports/snapshot.jsonl"),"{}\n");
 },"JSONL_HASH_MISMATCH"));
-test("unapproved baseline blocks despite Evidence PASS",(t) => blockedTest(t,async (f) => {
+test("unapproved baseline remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.baselineBytes = baseline(permissions(),"PENDING"); await f.commit();
 },"BASELINE_UNAPPROVED"));
-test("invalid baseline signature blocks",(t) => blockedTest(t,async (f) => {
+test("invalid baseline signature remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   const b = JSON.parse(f.baselineBytes.toString());
   b.approval.signatureBase64 = Buffer.alloc(64).toString("base64");
   f.baselineBytes = Buffer.from(JSON.stringify(b)); await f.commit();
 },"BASELINE_UNAPPROVED"));
-test("unknown role blocks",(t) => blockedTest(t,async (f) => {
+test("unknown role remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.rows.push(row("role","unapproved",{...f.rows.find((r) => r.section === "role").data,
     role_name:"unapproved",role_oid:"12"}));
   f.rows.push(row("effective_database","unapproved",{role:"unapproved",role_oid:"12",
@@ -314,7 +588,7 @@ test("unknown role blocks",(t) => blockedTest(t,async (f) => {
     usage:true,create:false}));
   await f.commit();
 },"UNKNOWN_ROLE"));
-test("role attribute expansion blocks",(t) => blockedTest(t,async (f) => {
+test("role attribute expansion remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.rows.find((r) => r.section === "role" && r.item === "normal").data.bypass_rls = true;
   await f.commit();
 },"ROLE_PRIVILEGE_DRIFT"));
@@ -339,24 +613,24 @@ test("self-consistent Schema ACL count mismatch blocks before C1",async (t) => {
   await f.commit();
   assertSecurityNotRun(await run(f),"SCHEMA_ACL_COUNT_MISMATCH");
 });
-test("new membership edge blocks",(t) => blockedTest(t,async (f) => {
+test("new membership edge remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.rows.push(row("membership","101",{...f.rows.find((r) => r.section === "membership").data,
     membership_oid:"101",member:"postgres",member_oid:"10",parent:"normal",parent_oid:"11"}));
   await f.commit();
 },"UNKNOWN_MEMBERSHIP"));
-test("membership option drift blocks",(t) => blockedTest(t,async (f) => {
+test("membership option drift remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.rows.find((r) => r.section === "membership").data.admin_option = true;
   await f.commit();
 },"MEMBERSHIP_OPTION_DRIFT"));
-test("PUBLIC CREATE expansion blocks",(t) => blockedTest(t,async (f) => {
+test("PUBLIC CREATE expansion remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.rows.find((r) => r.section === "public_database_privilege").data.create = true;
   await f.commit();
 },"PUBLIC_PRIVILEGE_DRIFT"));
-test("PUBLIC TEMP conflict blocks",(t) => blockedTest(t,async (f) => {
+test("PUBLIC TEMP conflict remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.rows.find((r) => r.section === "public_database_privilege").data.temp = true;
   await f.commit();
 },"PUBLIC_PRIVILEGE_DRIFT"));
-test("default ACL expansion blocks",(t) => blockedTest(t,async (f) => {
+test("default ACL expansion remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.rows.push(row("default_acl","9:0:10:EXECUTE",{default_acl_oid:"9",creator:"postgres",creator_oid:"10",
     schema:null,schema_oid:"0",scope:"ALL_SCHEMAS",object_type:"f",
     acl_source:"EXPLICIT_DEFAULT_ACL",grantee:"PUBLIC",grantee_oid:"0",
@@ -365,7 +639,7 @@ test("default ACL expansion blocks",(t) => blockedTest(t,async (f) => {
   f.rows.find((r) => r.section === "default_acl_state").data.explicit_default_acl_record_count = 1;
   await f.commit();
 },"DEFAULT_ACL_EXPANSION"));
-test("new high privilege SET ROLE path blocks",(t) => blockedTest(t,async (f) => {
+test("new high privilege SET ROLE path remains C1 BLOCKED",(t) => blockedSecurityTest(t,async (f) => {
   f.rows.find((r) => r.section === "membership").data.set_option = true;
   await f.commit();
 },"PRIVILEGED_ROLE_REACHABILITY_DRIFT"));
@@ -377,12 +651,14 @@ test("missing trust anchor or module input error fails closed",async (t) => {
   assert.ok(out.reasonCodes.includes("PIPELINE_INPUT_INVALID"));
 });
 test("source authentication remains unverified on synthetic match",async (t) => {
-  const out = await run(await fixture(t));
+  const out = await run(await addHistory(await fixture(t,emptyPermissions())));
+  assert.equal(out.overallStatus,"SYNTHETIC_MATCH_ONLY");
   assert.equal(out.sourceAuthenticationStatus,"SOURCE_AUTHENTICATION_UNVERIFIED");
   assert.notEqual(out.overallStatus,"PASS");
 });
 test("raw export completeness remains unverified on synthetic match",async (t) => {
-  const out = await run(await fixture(t));
+  const out = await run(await addHistory(await fixture(t,emptyPermissions())));
+  assert.equal(out.overallStatus,"SYNTHETIC_MATCH_ONLY");
   assert.equal(out.rawExportCompletenessStatus,"RAW_EXPORT_COMPLETENESS_UNVERIFIED");
   assert.notEqual(out.overallStatus,"PASS");
 });

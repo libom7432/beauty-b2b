@@ -5,7 +5,8 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { validateCatalogA6Evidence, SECTIONS } from "./catalog-a6-evidence-validator.mjs";
+import { validateCatalogA6Evidence, validateCatalogA6MigrationHistory, SECTIONS } from
+  "./catalog-a6-evidence-validator.mjs";
 
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const put = (section,item,data) => ({section,item,row_key:`${section}:${item}`,data});
@@ -399,3 +400,142 @@ test("required public schema row cannot disappear behind self-consistent invento
   f.rows = completeRows(f.rows.filter((r) => !(r.section === "schema" && r.item === "public")));
   await f.write();
 },"REQUIRED_ROW_MISSING_OR_DUPLICATE"));
+
+// A separate synthetic version-only export. SQL is stored as text, never executed.
+async function historyFixture(t,{stage="empty",adminIdentity="absent",versions}={}) {
+  const f=await fixture(t);
+  if (stage !== "empty") {
+    f.rows.find((r) => r.section === "migration_registry").data.exists=true;
+    await f.write();
+  }
+  const selected=versions ?? (stage === "empty" ? [] : ["20261013120000",
+    ...(adminIdentity === "present" ? ["20261018120000"] : []),
+    ...(stage === "admin-read" ? ["20261020120000"] : [])]);
+  const historyBundle=path.join(f.temp,"history"),
+    historyPolicyFile=path.join(f.temp,"history-policy.json");
+  for (const dir of ["approved","records","raw","exports"])
+    await mkdir(path.join(historyBundle,dir),{recursive:true});
+  const querySql="SELECT version FROM supabase_migrations.schema_migrations ORDER BY version;\n";
+  const h={f,historyBundle,historyPolicyFile,stage,adminIdentity,versions:selected,
+    querySql,rawOverride:null,jsonlOverride:null,anchor:""};
+  h.write=async () => {
+    const raw=h.rawOverride ?? `version\n${h.versions.map((v) => `${v}\n`).join("")}`;
+    const converted=h.jsonlOverride ?? h.versions.map((v) =>
+      JSON.stringify({version:v})+"\n").join("");
+    const snapshotManifest=await import("node:fs/promises").then(({readFile}) =>
+      readFile(path.join(f.bundle,"manifest.json")));
+    const policy={kind:"CATALOG_A6_HISTORY_POLICY_V1",projectRef:targetRef,
+      databaseName:"postgres",postgresVersion:"17.11",identity:f.policy.identity,
+      queries:[{id:"migration_history",version:"catalog-a6-migration-history-v1",
+        sqlSha256:sha(querySql)}]};
+    const entry={id:"migration_history",version:"catalog-a6-migration-history-v1",
+      approvedSqlFile:"approved/history.sql",approvedSqlSha256:sha(querySql),
+      recordFile:"records/history.json",recordSha256:"",rawExportFile:"raw/history.csv",
+      rawExportSha256:sha(raw),jsonlFile:"exports/history.jsonl",jsonlSha256:sha(converted),
+      rowCount:h.versions.length,columns:["version"],truncated:false,exportId:"synthetic-export"};
+    const manifest={kind:"CATALOG_A6_HISTORY_BUNDLE_V1",projectRef:targetRef,
+      databaseName:"postgres",postgresVersion:"17.11",
+      snapshotManifestSha256:sha(snapshotManifest),snapshotJsonlSha256:f.entry.jsonlSha256,
+      queries:[entry]};
+    const record={queryId:entry.id,executionId:"synthetic-history-execution",
+      projectRef:targetRef,databaseName:"postgres",postgresVersion:"17.11",
+      operator:f.policy.identity.operator,currentUser:"postgres",sessionUser:"postgres",
+      executedAtUtc:"2026-11-09T03:49:32.000Z",success:true,sqlVersion:entry.version,
+      executedSql:querySql,executedSqlSha256:sha(querySql),rawExportFile:entry.rawExportFile,
+      rawExportSha256:entry.rawExportSha256,jsonlFile:entry.jsonlFile,
+      jsonlSha256:entry.jsonlSha256,rowCount:entry.rowCount,columns:entry.columns,
+      truncated:false,exportId:entry.exportId,
+      snapshotManifestSha256:manifest.snapshotManifestSha256,
+      snapshotJsonlSha256:manifest.snapshotJsonlSha256};
+    const recordText=JSON.stringify(record); entry.recordSha256=sha(recordText);
+    const policyText=JSON.stringify(policy); h.anchor=sha(policyText);
+    await Promise.all([writeFile(historyPolicyFile,policyText),
+      writeFile(path.join(historyBundle,"manifest.json"),JSON.stringify(manifest)),
+      writeFile(path.join(historyBundle,entry.approvedSqlFile),querySql),
+      writeFile(path.join(historyBundle,entry.recordFile),recordText),
+      writeFile(path.join(historyBundle,entry.rawExportFile),raw),
+      writeFile(path.join(historyBundle,entry.jsonlFile),converted)]);
+    h.manifest=manifest; h.policy=policy; h.record=record;
+  };
+  await h.write();
+  return h;
+}
+const historyCheck=(h,extra={}) => validateCatalogA6MigrationHistory({
+  snapshotBundleDirectory:h.f.bundle,snapshotPolicyFile:h.f.policyFile,
+  expectedSnapshotPolicySha256:h.f.anchor,historyBundleDirectory:h.historyBundle,
+  historyPolicyFile:h.historyPolicyFile,expectedHistoryPolicySha256:h.anchor,
+  stage:h.stage,adminIdentity:h.adminIdentity,...extra});
+const historyBlocked=async (t,mutate,code,options={}) => {
+  const h=await historyFixture(t,options); await mutate(h);
+  const out=await historyCheck(h);
+  assert.equal(out.internalConsistency,"INTERNAL_CONSISTENCY_BLOCKED",JSON.stringify(out));
+  assert.equal(out.migrationVersions,null);
+  assert.equal(out.binding,null);
+  assert.ok(out.findings.some((f) => f.code === code),JSON.stringify(out.findings));
+};
+
+test("version-only empty history is byte-bound to a verified absent registry",async (t) => {
+  const h=await historyFixture(t),out=await historyCheck(h);
+  assert.equal(out.internalConsistency,"INTERNAL_CONSISTENCY_PASS",JSON.stringify(out));
+  assert.deepEqual(out.migrationVersions,[]);
+  assert.equal(out.binding.historyRawSha256,sha("version\n"));
+  assert.equal(out.sourceAuthentication,"SOURCE_AUTHENTICATION_UNVERIFIED");
+});
+test("foundation history returns only verified versions",async (t) => {
+  const h=await historyFixture(t,{stage:"foundation"}),out=await historyCheck(h);
+  assert.equal(out.internalConsistency,"INTERNAL_CONSISTENCY_PASS",JSON.stringify(out));
+  assert.deepEqual(out.migrationVersions,["20261013120000"]);
+});
+test("Admin Read history has its distinct version set",async (t) => {
+  const h=await historyFixture(t,{stage:"admin-read",adminIdentity:"present"});
+  const out=await historyCheck(h);
+  assert.equal(out.internalConsistency,"INTERNAL_CONSISTENCY_PASS",JSON.stringify(out));
+  assert.equal(out.migrationVersions.length,3);
+});
+test("raw hash mismatch blocks",(t) => historyBlocked(t,async (h) => {
+  await writeFile(path.join(h.historyBundle,"raw/history.csv"),"version\n20261013120000\n");
+},"HISTORY_RAW_HASH_MISMATCH"));
+test("manifest snapshot binding mismatch blocks",(t) => historyBlocked(t,async (h) => {
+  h.manifest.snapshotJsonlSha256="0".repeat(64);
+  await writeFile(path.join(h.historyBundle,"manifest.json"),JSON.stringify(h.manifest));
+},"HISTORY_MANIFEST_INVALID"));
+test("duplicate version blocks",(t) => historyBlocked(t,async (h) => {
+  h.versions=["20261013120000","20261013120000"]; await h.write();
+},"HISTORY_DUPLICATE_VERSION",{stage:"foundation"}));
+test("missing version field blocks",(t) => historyBlocked(t,async (h) => {
+  h.jsonlOverride='{}\n'; await h.write();
+},"HISTORY_VERSION_INVALID",{stage:"foundation"}));
+test("invalid version format blocks",(t) => historyBlocked(t,async (h) => {
+  h.versions=["bad-version"]; await h.write();
+},"HISTORY_VERSION_INVALID",{stage:"foundation"}));
+test("empty history cannot satisfy foundation",(t) => historyBlocked(t,async (h) => {
+  h.versions=[]; await h.write();
+},"HISTORY_STAGE_MISMATCH",{stage:"foundation"}));
+test("version set for wrong stage blocks",(t) => historyBlocked(t,async (h) => {
+  h.versions=["20261013120000"]; await h.write();
+},"HISTORY_STAGE_MISMATCH"));
+test("extra unknown JSONL field blocks",(t) => historyBlocked(t,async (h) => {
+  h.jsonlOverride='{"version":"20261013120000","extra":true}\n'; await h.write();
+},"HISTORY_VERSION_INVALID",{stage:"foundation"}));
+test("missing raw export blocks",(t) => historyBlocked(t,async (h) => {
+  const {unlink}=await import("node:fs/promises");
+  await unlink(path.join(h.historyBundle,"raw/history.csv"));
+},"DECLARED_FILE_MISSING"));
+test("replaced JSONL blocks",(t) => historyBlocked(t,async (h) => {
+  await writeFile(path.join(h.historyBundle,"exports/history.jsonl"),"{}\n");
+},"HISTORY_JSONL_HASH_MISMATCH"));
+test("symlink replacement of history export blocks",(t) => historyBlocked(t,async (h) => {
+  const {unlink,symlink}=await import("node:fs/promises");
+  const file=path.join(h.historyBundle,"exports/history.jsonl");
+  await unlink(file);
+  await symlink(path.join(h.historyBundle,"raw/history.csv"),file);
+},"FILE_TYPE_INVALID"));
+test("caller verified flag cannot bypass validation",async (t) => {
+  const h=await historyFixture(t);
+  const out=await historyCheck(h,{verified:true,trusted:true,expectedHistoryPolicySha256:"0".repeat(64)});
+  assert.equal(out.internalConsistency,"INTERNAL_CONSISTENCY_BLOCKED");
+  assert.equal(out.migrationVersions,null);
+});
+test("existing snapshot rejection also blocks history",(t) => historyBlocked(t,async (h) => {
+  await writeFile(path.join(h.f.bundle,"exports/snapshot.jsonl"),"{}\n");
+},"SNAPSHOT_EVIDENCE_BLOCKED"));

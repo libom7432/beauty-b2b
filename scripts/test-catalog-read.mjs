@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { createCatalogReadRepository } from "../src/lib/catalog-read/repository-core.ts";
+import { createCatalogReadRepository, MAX_PUBLIC_EXACT_LOOKUP } from "../src/lib/catalog-read/repository-core.ts";
 import { createAdminCursorCodec } from "../src/lib/catalog-read/admin-cursor.ts";
 import { createOfflineCatalogSource, notConfiguredCatalogSource, projectPublicCatalogBundle } from "../src/lib/catalog-read/offline.ts";
 import { mapCategories, referencePrice, safeBigint, toPublic } from "../src/lib/catalog-read/mapping.ts";
@@ -68,6 +68,48 @@ test("published projection filters draft/retired product, variants and images", 
   assert.equal(JSON.stringify(result).includes("storageKey"), false);
   assert.equal(JSON.stringify(result).includes("draft"), false);
   await rejects(repo().getPublishedProductBySlug("family-2"), "NOT_FOUND");
+});
+test("exact public ID lookup returns only published products and variants with public SKU and MOQ", async () => {
+  const items = await repo().getPublishedProductsByIds([id(4), id(1)]);
+  assert.deepEqual(items.map((item) => item.id), [id(4), id(1)]);
+  assert.deepEqual(items[1].variants.map((item) => item.sku), ["SKU-101"]);
+  assert.equal(items[1].variants[0].id, id(101));
+  assert.deepEqual(items[1].variants[0].moq, { quantity: 100, unit: "pieces" });
+  assert.deepEqual(items[1].variants[0].referencePrice,
+    { kind: "usd_reference", amount: "12.3456", currency: "USD" });
+  assert.equal(JSON.stringify(items).includes("storage_key"), false);
+  assert.equal(JSON.stringify(items).includes("storageKey"), false);
+  assert.equal(JSON.stringify(items).includes("created_at"), false);
+  for (const unavailable of [id(2), id(3), id(999)])
+    await rejects(repo().getPublishedProductsByIds([unavailable]), "NOT_FOUND");
+  await rejects(repo().getPublishedProductsByIds([id(1), id(2)]), "NOT_FOUND");
+});
+test("exact public ID lookup rejects invalid, duplicate and unbounded inputs before source access", async () => {
+  let calls = 0;
+  const source = { ...createOfflineCatalogSource(fixtures), async getPublishedByIds(ids) {
+    calls++;
+    return createOfflineCatalogSource(fixtures).getPublishedByIds(ids);
+  } };
+  const reader = createCatalogReadRepository(source);
+  for (const input of [[], ["bad"], [id(1), id(1).toUpperCase()],
+    Array.from({ length: MAX_PUBLIC_EXACT_LOOKUP + 1 }, (_, index) => id(index + 1)), "bad"])
+    await rejects(reader.getPublishedProductsByIds(input), "INVALID_INPUT");
+  assert.equal(calls, 0);
+  const oldSource = { ...source, getPublishedByIds: undefined };
+  await rejects(createCatalogReadRepository(oldSource).getPublishedProductsByIds([id(1)]), "NOT_CONFIGURED");
+  assert.equal(calls, 0);
+});
+test("exact public ID lookup fails on source error, wrong identity or variant ownership", async () => {
+  const valid = projectPublicCatalogBundle(bundle(1));
+  const read = (getPublishedByIds) => createCatalogReadRepository({
+    ...createOfflineCatalogSource([]), getPublishedByIds,
+  }).getPublishedProductsByIds([id(1)]);
+  await rejects(read(async () => { throw Error("source failed"); }), "SOURCE_UNAVAILABLE");
+  await rejects(read(async () => [projectPublicCatalogBundle(bundle(4))]), "INTERNAL_ERROR");
+  await rejects(read(async () => [{ ...valid, variants: [{ ...valid.variants[0], product_id: id(4) }] }]),
+    "INTERNAL_ERROR");
+  await rejects(read(async () => [valid, valid]), "INTERNAL_ERROR");
+  await rejects(read(async () => []), "NOT_FOUND");
 });
 test("one family has multiple distinct SKUs and exact variant image association", async () => {
   const detail = await repo().getAdminProductByCode("FAMILY-1");

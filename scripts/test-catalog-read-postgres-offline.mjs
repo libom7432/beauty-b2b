@@ -28,12 +28,14 @@ const auth = (session = "admin") => ({ session, dependencies: {
 } });
 const codec = () => createAdminCursorCodec(randomBytes(32).toString("base64url"));
 
-function fixture(products = [product(1), product(2)], publicOnly = false) {
+function fixture(products = [product(1), product(2)], publicOnly = false, variantRows = null) {
   const calls = [];
   let candidateRows = products;
   const snapshot = async (work) => work({ async select(sql, values) {
     calls.push({ sql, values });
     if (/FROM catalog_(?:private|public)\.products p/.test(sql)) {
+      if (/p\.id = ANY\(\$1::uuid\[\]\)/.test(sql)) return products.filter((row) =>
+        values[0].includes(row.id) && (!sql.includes("catalog_public") || row.status === "published"));
       if (/p\.id = \$1::uuid/.test(sql)) return products.filter((row) => row.id === values[0]);
       return candidateRows;
     }
@@ -41,8 +43,9 @@ function fixture(products = [product(1), product(2)], publicOnly = false) {
       product_id: row.id, locale: "en", name: `Family ${row.product_code}`,
       short_description: "", description: "", seo_title: "", seo_description: "",
       created_at: stamp, updated_at: stamp }));
-    if (/\.product_variants v/.test(sql)) return publicOnly ? [] : products.map((row) =>
-      variant(Number(row.product_code.split("-")[1])));
+    if (/\.product_variants v/.test(sql)) return publicOnly ? [] : (variantRows ?? products.map((row) =>
+      variant(Number(row.product_code.split("-")[1])))).filter((row) =>
+        !sql.includes("catalog_public") || row.status === "published");
     if (/\.product_categories l/.test(sql) && !/WITH RECURSIVE/.test(sql)) return [];
     if (/WITH RECURSIVE/.test(sql)) return [];
     if (/\.product_images i/.test(sql)) return [];
@@ -166,6 +169,22 @@ test("Public source selects only catalog_public view columns and excludes privat
   await sample.repository.listPublishedProducts({ limit: 1, status: "published" });
   assert.ok(sample.calls.every((call) => !call.sql.includes("catalog_private")));
   assert.doesNotMatch(sample.calls[0].sql, /p\.status/);
+});
+test("exact public ID query is bounded, parameterized and uses only public views", async () => {
+  const draftVariant = { ...variant(1), id: id(202), sku: "HIDDEN", status: "draft" };
+  const sample = fixture([product(1), product(2, "draft")], false, [variant(1), draftVariant]);
+  const result = await sample.repository.getPublishedProductsByIds([id(1)]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].id, id(1));
+  assert.deepEqual(result[0].variants.map((entry) => entry.sku), ["SKU-1"]);
+  assert.deepEqual(result[0].variants[0].moq, { quantity: 100, unit: "pieces" });
+  assert.deepEqual(result[0].variants[0].referencePrice,
+    { kind: "usd_reference", amount: "12.3400", currency: "USD" });
+  assert.match(sample.calls[0].sql, /FROM catalog_public\.products p WHERE p\.id = ANY\(\$1::uuid\[\]\) ORDER BY p\.id LIMIT \$2::integer/);
+  assert.deepEqual(sample.calls[0].values, [[id(1)], 2]);
+  assert.ok(sample.calls.every((call) => !call.sql.includes("catalog_private") && !call.sql.includes("storage_key")));
+  assert.equal(JSON.stringify(result).includes("status"), false);
+  await assert.rejects(sample.repository.getPublishedProductsByIds([id(2)]), { code: "NOT_FOUND" });
 });
 
 test("server configuration accepts only the dedicated test cluster TCP target", () => {

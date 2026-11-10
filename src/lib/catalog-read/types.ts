@@ -197,6 +197,8 @@ export interface CatalogReadSource {
   readonly mode: "offline" | "read_only" | "not_configured";
   listPublished(query: SourceQuery): Promise<SourcePage<PublicCatalogBundle>>;
   getPublishedBySlug(slug: string): Promise<PublicCatalogBundle | null>;
+  /** Exact, bounded lookup from the published public projection; absent on older sources. */
+  getPublishedByIds?(ids: readonly string[]): Promise<readonly PublicCatalogBundle[]>;
   listAdmin(query: SourceQuery): Promise<SourcePage<PrivateCatalogBundle>>;
   getAdminByCode(code: string): Promise<PrivateCatalogBundle | null>;
   /** Optional for older B1 sources; UUID lookup must be bounded and read-only. */

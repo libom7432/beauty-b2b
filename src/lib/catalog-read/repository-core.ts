@@ -14,6 +14,7 @@ import type { AdminCategoryOptions, AdminCategoryReadResult, AdminProductDetailD
   AdminCollectionMembershipCheckResult } from "./types.ts";
 
 export const MAX_PAGE_SIZE = 50;
+export const MAX_PUBLIC_EXACT_LOOKUP = 20;
 const DEFAULT_PAGE_SIZE = 20;
 type Cursor = { v: 1; scope: CatalogScope; sort: CatalogSort; filter: string;
   id: string; featured: boolean; timestamp: string; productCode?: string };
@@ -102,6 +103,7 @@ async function safeSource<T>(task: () => Promise<T>): Promise<T> {
 export interface CatalogReadRepository {
   listPublishedProducts(query?: CatalogListQuery): Promise<CatalogPage<PublicProductDTO>>;
   getPublishedProductBySlug(slug: string): Promise<PublicProductDTO>;
+  getPublishedProductsByIds(ids: readonly string[]): Promise<readonly PublicProductDTO[]>;
   listAdminProducts(query?: CatalogListQuery): Promise<CatalogPage<AdminProductListDTO>>;
   getAdminProductByCode(code: string): Promise<AdminProductDetailDTO>;
   getAdminProductById(id: string): Promise<AdminProductDetailDTO>;
@@ -151,6 +153,25 @@ export function createCatalogReadRepository(source: CatalogReadSource, admin: Re
       const bundle = await safeSource(() => source.getPublishedBySlug(slug));
       if (!bundle) throw new CatalogReadError("NOT_FOUND");
       return toPublic(bundle);
+    },
+    async getPublishedProductsByIds(ids) {
+      if (!Array.isArray(ids) || ids.length < 1 || ids.length > MAX_PUBLIC_EXACT_LOOKUP ||
+        ids.some((id) => typeof id !== "string" || !UUID.test(id)) ||
+        new Set(ids.map((id) => id.toLowerCase())).size !== ids.length) return failInput();
+      configured();
+      if (!source.getPublishedByIds) throw new CatalogReadError("NOT_CONFIGURED");
+      const bundles = await safeSource(() => source.getPublishedByIds!(ids));
+      if (!Array.isArray(bundles) || bundles.length > ids.length) throw new CatalogReadError("INTERNAL_ERROR");
+      const requested = new Set(ids.map((id) => id.toLowerCase()));
+      const found = new Map<string, PublicProductDTO>();
+      for (const bundle of bundles) {
+        const item = toPublic(bundle);
+        const key = item.id.toLowerCase();
+        if (!requested.has(key) || found.has(key)) throw new CatalogReadError("INTERNAL_ERROR");
+        found.set(key, item);
+      }
+      if (found.size !== ids.length) throw new CatalogReadError("NOT_FOUND");
+      return ids.map((id) => found.get(id.toLowerCase())!);
     },
     listAdminProducts: (query = {}) => list("admin", query, (normalized) => source.listAdmin(normalized), toAdminList),
     async listAdminCategories() {

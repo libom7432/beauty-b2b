@@ -125,6 +125,10 @@ export function createOfflineCatalogSource(fixtures: readonly PrivateCatalogBund
       return pagePublic(rows, query);
     },
     async getPublishedBySlug(slug) { return publicRows.find((row) => row.product.slug === slug) ?? null; },
+    async getPublishedByIds(ids) {
+      const selected = new Set(ids.map((id) => id.toLowerCase()));
+      return publicRows.filter((row) => selected.has(row.product.id.toLowerCase()));
+    },
     async listAdmin(query) {
       const rows = fixtures.filter((bundle) =>
         (!query.status || bundle.product.status === query.status) &&

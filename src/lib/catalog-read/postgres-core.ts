@@ -1,5 +1,5 @@
 import { CatalogReadError } from "./errors.ts";
-import { decodeCursor } from "./repository-core.ts";
+import { decodeCursor, MAX_PUBLIC_EXACT_LOOKUP } from "./repository-core.ts";
 import { adminBoundaryWitness, type AdminCursorBoundary } from "./admin-cursor.ts";
 import { PUBLIC_CATALOG_PROJECTION } from "./types.ts";
 import { MAX_ADMIN_CATEGORIES } from "./admin-categories.ts";
@@ -237,6 +237,18 @@ export function createPostgresCatalogReadSource(snapshot: ReadSnapshot): Catalog
           FROM catalog_public.products p WHERE p.slug = $1 LIMIT 1`, [slug]);
         const bundle = (await hydrate(client, products, "public"))[0];
         return bundle ? { ...bundle, [PUBLIC_CATALOG_PROJECTION]: true } as PublicCatalogBundle : null;
+      });
+    },
+    async getPublishedByIds(ids) {
+      if (!Array.isArray(ids) || ids.length < 1 || ids.length > MAX_PUBLIC_EXACT_LOOKUP)
+        throw new CatalogReadError("INVALID_INPUT");
+      return snapshot(async (client) => {
+        const products = await client.select<PublicProductViewRow>(`SELECT ${publicProduct}
+          FROM catalog_public.products p WHERE p.id = ANY($1::uuid[]) ORDER BY p.id LIMIT $2::integer`,
+          [ids, ids.length + 1]);
+        if (products.length > ids.length) throw new CatalogReadError("SOURCE_UNAVAILABLE");
+        return (await hydrate(client, products, "public")).map((bundle) =>
+          ({ ...bundle, [PUBLIC_CATALOG_PROJECTION]: true } as PublicCatalogBundle));
       });
     },
   };

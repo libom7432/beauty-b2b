@@ -92,8 +92,10 @@ async function main() {
   }
   const testRoot = process.env.RFQ_C4_TEST_ROOT;
   const port = Number(process.env.RFQ_C4_PORT);
+  const permissionMode = process.env.RFQ_C4_PERMISSION_MODE ?? "strict";
   if (!testRoot || !path.isAbsolute(testRoot) || testRoot.startsWith(root + path.sep)
-    || !Number.isInteger(port) || port < 1024 || port > 65535)
+    || !Number.isInteger(port) || port < 1024 || port > 65535
+    || !["strict", "supabase_compat"].includes(permissionMode))
     throw new Error("LOCAL_TEST_CONFIGURATION_REJECTED");
   const credentials = JSON.parse(fs.readFileSync(path.join(testRoot, "credentials.json"), "utf8"));
   const catalogPool = clientPool("rfq_catalog_public_reader_runtime", credentials.catalog, port);
@@ -133,18 +135,25 @@ async function main() {
       }
     });
     await test("effective grants, RLS and forbidden data access", async () => {
+      const expectTemp = permissionMode === "supabase_compat";
+      const publicTemp = (await catalogPool.query(`SELECT EXISTS (
+        SELECT 1 FROM pg_database d,
+          aclexplode(COALESCE(d.datacl, acldefault('d', d.datdba))) grant_entry
+        WHERE d.datname = current_database() AND grant_entry.grantee = 0
+          AND grant_entry.privilege_type = 'TEMPORARY') AS granted`)).rows[0].granted;
+      assert.equal(publicTemp, expectTemp);
       const privileges = (await catalogPool.query(`SELECT
         has_database_privilege(current_user,current_database(),'CREATE') AS db_create,
         has_database_privilege(current_user,current_database(),'TEMPORARY') AS db_temp,
         has_schema_privilege(current_user,'catalog_private','USAGE') AS private_usage,
         has_schema_privilege(current_user,'rfq_private','USAGE') AS rfq_usage`)).rows[0];
-      assert.deepEqual(privileges, { db_create: false, db_temp: false,
+      assert.deepEqual(privileges, { db_create: false, db_temp: expectTemp,
         private_usage: false, rfq_usage: false });
       for (const pool of pools) {
         const rights = (await pool.query(`SELECT
           has_database_privilege(current_user,current_database(),'CREATE') AS db_create,
           has_database_privilege(current_user,current_database(),'TEMPORARY') AS db_temp`)).rows[0];
-        assert.deepEqual(rights, { db_create: false, db_temp: false });
+        assert.deepEqual(rights, { db_create: false, db_temp: expectTemp });
       }
       const rls = (await auditPool.query(`SELECT count(*)::integer AS n FROM pg_class c
         JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='rfq_private'

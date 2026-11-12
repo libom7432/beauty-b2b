@@ -7,6 +7,7 @@ import type { UrlEntry } from "@/lib/admin/collection-detail-query";
 import type { CandidateLocalMembershipStatus } from "@/lib/admin/collection-candidate-membership-status";
 import type { AdminCollectionMembershipCheckResult } from "@/lib/catalog-read/types";
 import { AdminBadge, AdminTable } from "./ui";
+import { useAdminUnsavedChanges } from "./admin-unsaved-changes";
 
 const stateCopy: Record<CandidateResult["state"], string> = {
   RESULTS: "Current query page", EMPTY: "No products matched this query.",
@@ -77,6 +78,7 @@ export function CollectionCandidateSearch({ collectionId, query, result, testDat
   nextHref: string | null; previousHref: string | null; firstHref: string;
 }) {
   const router = useRouter();
+  const { isNavigationBusy } = useAdminUnsavedChanges();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const locationKey = `${pathname}${searchParams.size ? `?${searchParams}` : ""}`;
@@ -155,7 +157,7 @@ export function CollectionCandidateSearch({ collectionId, query, result, testDat
     (searchInput !== querySearch || statusInput !== queryStatus);
   const navigate = (href: string, nextSearch = editableRef.current.search,
     nextStatus = editableRef.current.status) => {
-    if (attemptRef.current !== null) return;
+    if (attemptRef.current !== null || isNavigationBusy()) return;
     const origin = comparableUrl(window.location.href);
     const target = comparableUrl(href);
     onInvalidateVerification();
@@ -183,7 +185,7 @@ export function CollectionCandidateSearch({ collectionId, query, result, testDat
     navigate(hrefFor(search, status), search.trim(), status);
   };
   const clear = () => {
-    if (attemptRef.current !== null) return;
+    if (attemptRef.current !== null || isNavigationBusy()) return;
     const href = hrefFor("", "all");
     if (comparableUrl(href) === comparableUrl(window.location.href)) {
       onInvalidateVerification();

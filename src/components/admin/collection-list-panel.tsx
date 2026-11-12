@@ -1,6 +1,7 @@
-import Link from "next/link";
+import { GuardedAdminLink } from "./admin-unsaved-changes";
 import { AdminBadge, AdminEmptyState, AdminTable } from "./ui";
 import { adminCollectionsHref, type AdminCollectionsUrlQuery } from "@/lib/admin/collections-query";
+import { CollectionListFilters } from "./collection-list-filters";
 import type { AdminCollectionListResult } from "@/lib/catalog-read/types";
 
 type PanelState = AdminCollectionListResult["state"] | "INVALID_QUERY";
@@ -35,15 +36,7 @@ export function CollectionListPanel({ result, query }: {
       {result?.origin === "OFFLINE_FIXTURE" && <AdminBadge tone="warning">TEST DATA</AdminBadge>}
       <AdminBadge>{label}</AdminBadge>
     </div></div>
-    {query && <form action="/admin/collections" method="get" className="admin-collection-filters">
-      <label>Status <select name="status" defaultValue={query.status} aria-label="Collection status">
-        <option value="all">All statuses</option><option value="draft">Draft</option>
-        <option value="published">Published</option><option value="retired">Retired</option>
-      </select></label>
-      <button type="submit">Apply filter</button>
-      <Link href="/admin/collections">Clear filters</Link>
-      <p>Name and Slug search is unavailable until a bounded server-side query is approved.</p>
-    </form>}
+    {query && <CollectionListFilters query={query} />}
     <AdminTable caption="Catalog collections" headings={["Collection", "Slug", "Status", "Sort order", "Updated", "Details"]}>
       {rows.map((row) => <tr key={row.id}>
         <td><strong>{row.nameEn.trim() || "Unnamed"}</strong><br />{row.nameZh.trim() || "—"}</td>
@@ -55,21 +48,21 @@ export function CollectionListPanel({ result, query }: {
             <div><dt>Chinese name</dt><dd>{row.nameZh.trim() || "Unavailable"}</dd></div>
             <div><dt>Published at</dt><dd>{row.publishedAt?.slice(0, 10) || "Not published"}</dd></div></dl>
           <p>Read-only list information.</p>
-        </details><Link href={`/admin/collections/${row.id}`} className="admin-inline-link">
-          Open full details for {row.nameEn.trim() || row.slug}</Link></td>
+        </details><GuardedAdminLink href={`/admin/collections/${row.id}`} className="admin-inline-link">
+          Open full details for {row.nameEn.trim() || row.slug}</GuardedAdminLink></td>
       </tr>)}
       {rows.length === 0 && <tr><td colSpan={6}>
         {state === "COMPLETE" ? <AdminEmptyState title="No collections"
           description={query?.status !== "all" ? "No collections match this status." : "The connected source returned no collections."} /> :
           <div className="admin-collection-state" role={state === "ERROR" || state === "INCOMPLETE" || state === "INVALID_QUERY" ? "alert" : "status"}>
             <h3>{stateMessage[state].title}</h3><p>{stateMessage[state].description}</p>
-            {state === "INVALID_QUERY" && <Link href="/admin/collections">Start from first page</Link>}
+            {state === "INVALID_QUERY" && <GuardedAdminLink href="/admin/collections">Start from first page</GuardedAdminLink>}
           </div>}
       </td></tr>}
     </AdminTable>
     {query && <nav className="admin-product-pagination" aria-label="Collection pages">
-      {previous ? <Link href={previous}>Previous</Link> : <span aria-disabled="true">Previous</span>}
-      {next ? <Link href={next}>Next</Link> : <span aria-disabled="true">Next</span>}
+      {previous ? <GuardedAdminLink href={previous}>Previous</GuardedAdminLink> : <span aria-disabled="true">Previous</span>}
+      {next ? <GuardedAdminLink href={next}>Next</GuardedAdminLink> : <span aria-disabled="true">Next</span>}
     </nav>}
   </section>;
 }

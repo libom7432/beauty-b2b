@@ -21,7 +21,8 @@ export async function requireAdminPage(permission?: CatalogPermission) {
   const role = (await cookies()).get("admin-ui-fixture")?.value;
   if (!role) redirect("/admin/login");
   const permissions = role === "editor" ? ["catalog.read", "catalog.import.receipt.read"] :
-    role === "catalog-only" ? ["catalog.read"] : [];
+    role === "catalog-only" || role === "rfq-manager" ? ["catalog.read"] :
+    role === "rfq-reader" ? ["catalog.read", "rfq.read"] : [];
   if (permission && !permissions.includes(permission)) redirect("/admin/login?error=1");
 }
 `;
@@ -40,7 +41,9 @@ export const getAdminUIIdentity = cache(async () => {
     identity_provider: "fixture", provider_subject: "fixture-admin", status: "active",
     created_at: "2026-10-18T00:00:00Z", disabled_at: null,
     permissions: role === "editor" ? ["catalog.read", "catalog.import.receipt.read"] :
-      role === "catalog-only" ? ["catalog.read"] : [] } as AdminIdentity;
+      role === "catalog-only" ? ["catalog.read"] :
+      role === "rfq-reader" ? ["catalog.read", "rfq.read"] :
+      role === "rfq-manager" ? ["catalog.read", "rfq.manage"] : [] } as AdminIdentity;
 });
 export const readAdminUISession = cache(async () => {
   const role = (await cookies()).get("admin-ui-fixture")?.value;
@@ -207,14 +210,16 @@ export async function createServerCatalogReadRepository() {
     session: role,
     dependencies: {
       provider: { async verifySession(session) {
-        return session === "editor" || session === "catalog-only"
+        return session === "editor" || session === "catalog-only" || session === "rfq-reader" || session === "rfq-manager"
           ? { identity_provider: "fixture", provider_subject: session } : null;
       } },
       directory: { async findByProviderIdentity(identity) {
         return { admin_id: id(999), identity_provider: "fixture", provider_subject: identity.provider_subject,
           status: "active", created_at: date, disabled_at: null,
           permissions: state === "forbidden" ? [] : role === "editor"
-            ? ["catalog.read", "catalog.import.receipt.read"] : ["catalog.read"] };
+            ? ["catalog.read", "catalog.import.receipt.read"] : role === "rfq-reader"
+            ? ["catalog.read", "rfq.read"] : role === "rfq-manager"
+            ? ["catalog.read", "rfq.manage"] : ["catalog.read"] };
       } },
     },
   }, createAdminCursorCodec(process.env.ADMIN_CATALOG_CURSOR_SIGNING_KEY ?? ""),

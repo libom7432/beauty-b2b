@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { GuardedAdminLink } from "@/components/admin/admin-unsaved-changes";
 import { notFound } from "next/navigation";
 import { AdminBadge, AdminPageHeader } from "@/components/admin/ui";
 import { RFQInboxDetailPanel } from "@/components/admin/rfq-inbox-panel";
@@ -21,7 +21,7 @@ export default async function RFQInboxDetailPage({ params }: Props) {
   return <><AdminPageHeader eyebrow="MERCHANT / RFQ / DETAIL" title="RFQ detail"
     description="Private, read-only inquiry details and submission-time product terms.">
     <AdminBadge tone="warning">{detail ? "Read only" : "Not connected"}</AdminBadge></AdminPageHeader>
-    <p className="mb-5"><Link href="/admin/rfq" className="admin-inline-link">← Back to RFQ Inbox</Link></p>
+    <p className="mb-5"><GuardedAdminLink href="/admin/rfq" className="admin-inline-link">← Back to RFQ Inbox</GuardedAdminLink></p>
     {detail ? <RFQInboxDetailPanel detail={detail} /> : <div className="admin-card admin-rfq-state" role="alert">
       {state === "not_connected" ? "RFQ data source not connected." : "Inquiry details are temporarily unavailable."}</div>}
   </>;

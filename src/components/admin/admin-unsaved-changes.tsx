@@ -8,7 +8,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 export type AdminGuardAuthority = Readonly<{ identityKey: string; accessEpoch: number }>;
 type RequestBase = Readonly<{
   target: string;
-  scope: "GLOBAL" | "COLLECTION";
+  scope: "GLOBAL" | "COLLECTION" | "CURRENT";
   collectionId?: string;
   trigger?: HTMLElement | null;
 }>;
@@ -29,6 +29,8 @@ type Guard = {
   registerDirtyGetter: (getter: () => boolean) => () => void;
   registerDialogPreparation: (prepare: () => HTMLElement | null) => () => void;
   requestNavigation: (request: AdminNavigationRequest) => "EXECUTED" | "PENDING" | "REJECTED";
+  isNavigationBusy: () => boolean;
+  resumeNavigation: (target?: string) => boolean;
   cancelNavigation: () => void;
   approveNavigation: (id: number) => void;
 };
@@ -109,6 +111,14 @@ export function AdminUnsavedChangesProvider({ children, readAuthority, readColle
     return false;
   }, []);
   const requestedDirty = useCallback((request: AdminNavigationRequest) => {
+    if (request.scope === "CURRENT") {
+      const currentCollection = routeKey().match(collectionPath)?.[1];
+      if (!currentCollection) return legacyDirty.current;
+      const targetCollection = request.target.match(collectionPath)?.[1];
+      if (targetCollection?.toLowerCase() === currentCollection.toLowerCase()) return false;
+      if (!collectionDirtyRef.current) return true;
+      try { return collectionDirtyRef.current(currentCollection); } catch { return true; }
+    }
     if (request.scope === "COLLECTION") {
       if (!request.collectionId || !collectionDirtyRef.current) return true;
       try { return collectionDirtyRef.current(request.collectionId); } catch { return true; }
@@ -192,6 +202,7 @@ export function AdminUnsavedChangesProvider({ children, readAuthority, readColle
     publish(next);
     return "PENDING";
   }, [authorityMatches, publish, requestedDirty, startNavigation]);
+  const isNavigationBusy = useCallback(() => intentRef.current !== null, []);
   const approveNavigation = useCallback((id: number) => {
     const current = intentRef.current;
     if (!current || current.id !== id || current.phase !== "CONFIRMING") return;
@@ -205,13 +216,13 @@ export function AdminUnsavedChangesProvider({ children, readAuthority, readColle
     requestedDirty(current);
     startNavigation(current);
   }, [authorityMatches, invalidate, requestedDirty, startNavigation]);
-  const resumeEditing = useCallback(() => {
+  const resumeNavigation = useCallback((target?: string): boolean => {
     const current = intentRef.current;
     if (!current || (current.phase !== "NAVIGATING" &&
-      current.phase !== "RECOVERABLE_FAILURE")) return;
+      current.phase !== "RECOVERABLE_FAILURE") || (target && current.target !== target)) return false;
     if (!authorityMatches(current.authority) || routeKey() !== current.origin) {
       invalidate(false);
-      return;
+      return false;
     }
     // A pending router.push cannot be cancelled by this button. Its target
     // cannot be reused by a new attempt from the same origin: a late old RSC
@@ -224,6 +235,7 @@ export function AdminUnsavedChangesProvider({ children, readAuthority, readColle
     restoreFocusRef.current = current.trigger;
     setLastOutcome("RESUMED");
     publish(null);
+    return true;
   }, [authorityMatches, invalidate, publish]);
 
   useEffect(() => {
@@ -317,16 +329,17 @@ export function AdminUnsavedChangesProvider({ children, readAuthority, readColle
   };
 
   const value = useMemo(() => ({ setDirty, confirmNavigation, registerDirtyGetter,
-    registerDialogPreparation, requestNavigation, cancelNavigation, approveNavigation }),
+    registerDialogPreparation, requestNavigation, isNavigationBusy, resumeNavigation,
+    cancelNavigation, approveNavigation }),
   [setDirty, confirmNavigation, registerDirtyGetter, registerDialogPreparation,
-    requestNavigation, cancelNavigation, approveNavigation]);
+    requestNavigation, isNavigationBusy, resumeNavigation, cancelNavigation, approveNavigation]);
   return <GuardContext.Provider value={value}>{children}
     {(intent?.phase === "NAVIGATING" || intent?.phase === "RECOVERABLE_FAILURE") &&
       <div className="admin-guard-navigation-status" role="status" aria-live="polite">
         <p>{intent.phase === "RECOVERABLE_FAILURE"
           ? "Navigation could not start. / 导航未能开始。"
           : "Navigation is in progress. The earlier request may still finish. / 正在导航；此前的请求仍可能完成。"}</p>
-        <button ref={resumeRef} type="button" onClick={resumeEditing}>
+        <button ref={resumeRef} type="button" onClick={() => resumeNavigation()}>
           Resume editing / 恢复编辑
         </button>
       </div>}
@@ -342,7 +355,7 @@ export function AdminUnsavedChangesProvider({ children, readAuthority, readColle
       onCancel={(event) => { event.preventDefault(); cancelNavigation(); }}>
       <h2 id="admin-guard-title">Unsaved local changes / 尚未保存的本地修改</h2>
       <p id="admin-guard-description">{intent?.type === "SIGN_OUT"
-        ? "Signing out ends this local draft session. These changes are not saved to the server. / 登出将结束本地草稿会话；修改尚未保存到服务器。"
+          ? "Signing out permanently discards every unsaved local draft in this Admin tab. These changes are not saved to the server. / 登出将永久丢失此后台标签页中的所有未保存草稿；修改尚未保存到服务器。"
         : "These changes are not saved to the server. Continuing keeps the draft in this Admin tab for the current login session. / 修改尚未保存到服务器。继续导航后，同一登录会话中的此后台标签页会保留草稿。"}</p>
       <div className="admin-guard-actions">
         <button ref={stayRef} type="button" onClick={cancelNavigation}>Stay and keep editing / 留在此处继续编辑</button>
@@ -359,11 +372,13 @@ export function useAdminUnsavedChanges(): Guard {
   return value;
 }
 
-/** Existing links keep their synchronous confirmation until S4-C migration. */
+/** Admin route links share the Shell's navigation lock and current-page Dirty scope. */
 export function GuardedAdminLink({ href, children, className }: {
   href: string; children: ReactNode; className?: string }) {
-  const { confirmNavigation } = useAdminUnsavedChanges();
+  const { requestNavigation } = useAdminUnsavedChanges();
   return <Link href={href} className={className} onNavigate={(event) => {
-    if (!confirmNavigation()) event.preventDefault();
+    event.preventDefault();
+    requestNavigation({ type: "PUSH", scope: "CURRENT", target: href,
+      trigger: document.activeElement instanceof HTMLElement ? document.activeElement : null });
   }}>{children}</Link>;
 }

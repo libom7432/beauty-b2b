@@ -30,7 +30,7 @@ function SidebarContents({ items, pathname, onNavigate, onClose, closeButton }: 
   const { requestNavigation } = useAdminUnsavedChanges();
   const navigate = (target: string) => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const result = requestNavigation({ type: "PUSH", scope: "GLOBAL", target, trigger });
+    const result = requestNavigation({ type: "PUSH", scope: "CURRENT", target, trigger });
     if (result === "EXECUTED") onNavigate?.();
   };
   return <>
@@ -57,9 +57,9 @@ function SidebarContents({ items, pathname, onNavigate, onClose, closeButton }: 
   </>;
 }
 
-function AdminShellContents({ children, items, administrator, onSignOut, onSignOutFailure }: {
+function AdminShellContents({ children, items, administrator, onSignOut, onSignOutFailure, onSignOutSuccess }: {
   children: ReactNode; items: readonly AdminNavItem[]; administrator: string;
-  onSignOut: () => void; onSignOutFailure: () => void;
+  onSignOut: () => void; onSignOutFailure: () => void; onSignOutSuccess: () => void;
 }) {
   const { requestNavigation, registerDialogPreparation } = useAdminUnsavedChanges();
   const pathname = usePathname();
@@ -75,7 +75,7 @@ function AdminShellContents({ children, items, administrator, onSignOut, onSignO
 
   const navigateBreadcrumb = (target: string) => {
     const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    requestNavigation({ type: "PUSH", scope: "GLOBAL", target, trigger });
+    requestNavigation({ type: "PUSH", scope: "CURRENT", target, trigger });
   };
 
   const closeMenu = useCallback((restore: boolean) => {
@@ -168,7 +168,7 @@ function AdminShellContents({ children, items, administrator, onSignOut, onSignO
             <p className="admin-topbar-title">{title}</p>
           </div>
         </div>
-        <div className="admin-account"><span className="admin-avatar" role="img" aria-label={`Administrator ID ending ${administrator}`}>A</span><span className="admin-account-copy"><strong>Administrator</strong><small>ID · {administrator}</small></span><LogoutForm onStart={onSignOut} onFailure={onSignOutFailure} /></div>
+        <div className="admin-account"><span className="admin-avatar" role="img" aria-label={`Administrator ID ending ${administrator}`}>A</span><span className="admin-account-copy"><strong>Administrator</strong><small>ID · {administrator}</small></span><LogoutForm onStart={onSignOut} onFailure={onSignOutFailure} onSuccess={onSignOutSuccess} /></div>
       </header>
       <main id="admin-content" className="admin-content">{children}</main>
     </div>
@@ -327,6 +327,7 @@ export function AdminShell(props: { children: ReactNode; items: readonly AdminNa
     owner.lock();
     setIdentity({ phase: "INVALID" });
   }, [owner]);
+  const completeSignOut = useCallback(() => owner.destroy(), [owner]);
 
   return <AdminUnsavedChangesProvider readAuthority={readGuardAuthority}
     invalidationRef={invalidateGuard}
@@ -337,7 +338,7 @@ export function AdminShell(props: { children: ReactNode; items: readonly AdminNa
         items={identity.phase === "VERIFIED" ? props.items.filter((item) =>
           (item.permission !== "catalog.read" || identity.canReadCatalog) &&
           (item.permission !== "rfq.read" || identity.canReadRFQ)) : props.items}
-        onSignOut={signOut} onSignOutFailure={verifyIdentity} />}
+        onSignOut={signOut} onSignOutFailure={verifyIdentity} onSignOutSuccess={completeSignOut} />}
     </div>
     {!active && <div className="admin-identity-status" role="status">
       {identity.phase === "INVALID" ? "Admin identity is unavailable. Reload or sign in again."

@@ -1607,12 +1607,15 @@ test("dirty draft guards list and member navigation; refresh restores source", a
     window.dispatchEvent(event);
     return event.defaultPrevented;
   })).toBe(true);
-  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.dismiss(); });
   await page.getByRole("link", { name: "Back to Collections" }).click();
+  const leave = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(leave).toBeVisible();
+  await leave.getByRole("button", { name: /Stay and keep editing/ }).click();
   await expect(page).toHaveURL(new RegExp(`/admin/collections/${id(1)}$`));
   await expect(editor.getByLabel("English name")).toHaveValue("Unsaved name");
-  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.dismiss(); });
   await page.getByRole("region", { name: "Associated products" }).getByRole("link", { name: "Next" }).click();
+  await expect(leave).toBeHidden();
+  await expect(page).toHaveURL(/cursor=/);
   await expect(editor.getByLabel("English name")).toHaveValue("Unsaved name");
   page.once("dialog", async (dialog) => { await dialog.accept(); });
   await page.reload();
@@ -1701,10 +1704,13 @@ for (const scenario of [
       back.click();
       return { confirmations, beforeunloadPrevented: unload.defaultPrevented };
     }, { actions: scenario.actions, memberId: id(202), candidateId: id(101), originalBasicName });
-    expect(observed.confirmations).toBe(scenario.dirty ? 1 : 0);
+    expect(observed.confirmations).toBe(0);
     expect(observed.beforeunloadPrevented).toBe(scenario.dirty);
     const actions: readonly string[] = scenario.actions;
     if (scenario.dirty) {
+      const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+      await expect(guard).toBeVisible();
+      await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
       await expect(page).toHaveURL(detailUrl(2));
       if (actions.includes("basic")) await expect(basic.getByLabel("English name"))
         .toHaveValue(actions.includes("basic-reset") ? originalBasicName : "Same-task basic edit");
@@ -1721,9 +1727,20 @@ for (const scenario of [
   });
 }
 
-test("same-task member paging and confirmed departure use the current guard once", async ({ page, context }) => {
+test("same-Collection member paging bypasses departure confirmation; leaving uses the guard once", async ({ page, context }) => {
   await fixtureCookies(context, "collections");
   await page.goto(detailUrl(1));
+  await expect.poll(async () => {
+    const identityStatus = page.locator(".admin-identity-status");
+    const status = await identityStatus.count() ? await identityStatus.textContent() : null;
+    if (status?.includes("unavailable") || new URL(page.url()).pathname === "/admin/login")
+      throw Error("Admin identity verification failed before the Collection editor became available");
+    return page.locator(".admin-shell").isVisible();
+  }, { message: "Admin identity did not finish verification" }).toBe(true);
+  await expect(page.locator(`.admin-membership-editor [data-product-id="${id(101)}"] button`),
+    "Verified Collection is missing the member edit control").toBeVisible();
+  await expect(page.locator('nav[aria-label="Collection member pages"] a'),
+    "Verified Collection is missing the paging link").toBeVisible();
   const rejected = await page.evaluate((memberId) => {
     let confirmations = 0;
     window.confirm = () => { confirmations++; return false; };
@@ -1735,8 +1752,9 @@ test("same-task member paging and confirmed departure use the current guard once
     remove.click(); next.click();
     return confirmations;
   }, id(101));
-  expect(rejected).toBe(1);
-  await expect(page).toHaveURL(detailUrl(1));
+  expect(rejected).toBe(0);
+  await expect(page).toHaveURL(/cursor=/);
+  await expect(page.getByRole("dialog", { name: /Unsaved local changes/ })).toBeHidden();
   await expect(page.getByRole("region", { name: "Local collection membership editor" })
     .locator(`[data-product-id="${id(101)}"]`)
     .getByRole("button", { name: "Restore locally" })).toBeVisible();
@@ -1749,7 +1767,9 @@ test("same-task member paging and confirmed departure use the current guard once
     back.click();
     return confirmations;
   });
-  expect(accepted).toBe(1);
+  expect(accepted).toBe(0);
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Continue navigation/ }).click();
   await expect(page).toHaveURL(`${fixtureOrigin}/admin/collections`);
 });
 
@@ -1777,7 +1797,10 @@ test("same-task Basic field changes preserve the final dirty draft before naviga
     back.click();
     return count;
   }, originalZh);
-  expect(confirmations).toBe(1);
+  expect(confirmations).toBe(0);
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
   await expect(page).toHaveURL(detailUrl(2));
   await expect(basic.getByLabel("English name")).toHaveValue("Keep this English edit");
   await expect(basic.getByLabel("中文名称")).toHaveValue(originalZh);
@@ -1789,7 +1812,6 @@ test("basic draft remains mounted across successful member pagination", async ({
   const editor = page.getByRole("region", { name: "Local collection basic editor" });
   await editor.getByRole("button", { name: "Edit local draft" }).click();
   await editor.getByLabel("English name").fill("Across pages");
-  page.once("dialog", async (dialog) => { await dialog.accept(); });
   await page.getByRole("navigation", { name: "Collection member pages" }).getByRole("link", { name: "Next" }).click();
   await expect(page).toHaveURL(/cursor=/);
   await expect(editor.getByLabel("English name")).toHaveValue("Across pages");
@@ -1815,12 +1837,10 @@ test("membership draft survives member pages and both drafts keep the leave guar
   await expect(memberEditor.getByText("Unsaved membership changes")).toBeVisible();
   await basic.getByRole("button", { name: "Edit local draft" }).click();
   await basic.getByLabel("English name").fill("Unsaved basic");
-  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.accept(); });
   await page.getByRole("navigation", { name: "Collection member pages" }).getByRole("link", { name: "Next" }).click();
   await expect(memberEditor.locator("[data-product-id]")).toHaveCount(50);
   await expect(first.getByRole("button", { name: "Restore locally" })).toBeVisible();
   await expect(basic.getByLabel("English name")).toHaveValue("Unsaved basic");
-  page.once("dialog", async (dialog) => { await dialog.accept(); });
   await page.getByRole("navigation", { name: "Collection member pages" }).getByRole("link", { name: "Previous" }).click();
   await expect(first.getByRole("button", { name: "Restore locally" })).toBeVisible();
   await basic.getByRole("button", { name: "Discard changes" }).click();
@@ -1842,8 +1862,9 @@ test("membership draft survives member pages and both drafts keep the leave guar
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event); return event.defaultPrevented;
   })).toBe(true);
-  page.once("dialog", async (dialog) => { await dialog.dismiss(); });
   await page.getByRole("link", { name: "Back to Collections" }).click();
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Stay and keep editing/ }).click();
   await expect(basic.getByLabel("English name")).toHaveValue("Basic only");
   await basic.getByRole("button", { name: "Discard changes" }).click();
   await expect.poll(() => page.evaluate(() => {
@@ -2172,6 +2193,11 @@ test("AdminShell Basic session survives client routes, history, and isolates Col
       document.querySelector(".admin-shell");
   });
   await page.getByRole("link", { name: "Back to Collections" }).click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await expect(page).toHaveURL(detailUrl(1));
+  await expect(basic().getByLabel("English name")).toHaveValue("Unsaved A");
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
   await expect(page).toHaveURL(/\/admin\/collections$/);
   expect(await page.evaluate(() => document.querySelector(".admin-shell") ===
     (window as typeof window & { adminShellForTest?: Element | null }).adminShellForTest)).toBe(true);
@@ -2180,6 +2206,11 @@ test("AdminShell Basic session survives client routes, history, and isolates Col
   await basic().getByRole("button", { name: "Edit local draft" }).click();
   await basic().getByLabel("English name").fill("Unsaved B");
   await page.getByRole("link", { name: "Back to Collections" }).click();
+  await expect(guard).toBeVisible();
+  await expect(page).toHaveURL(detailUrl(2));
+  await expect(basic().getByLabel("English name")).toHaveValue("Unsaved B");
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(/\/admin\/collections$/);
   await list.getByRole("link", { name: "Open full details for Collection 1", exact: true }).click();
   await basic().getByRole("button", { name: "Edit local draft" }).click();
   await expect(basic().getByLabel("English name")).toHaveValue("Unsaved A");
@@ -2218,7 +2249,16 @@ test("AdminShell discards the prior administrator draft before a changed identit
   await expect(basic().getByText("Unsaved local changes")).toBeVisible();
   await fixtureCookies(context, "collections", "catalog-only");
   await page.getByRole("link", { name: "Back to Collections" }).click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await expect(page).toHaveURL(detailUrl(1));
+  await expect(basic().getByLabel("English name")).toHaveValue("Private draft from A");
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(/\/admin\/collections$/);
   await expect(page.getByLabel("Administrator ID ending 22222222")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Admin navigation" }).first()
+    .getByRole("link", { name: "Collections" })).toBeVisible();
+  await expect(page.locator('a[href="/admin/imports"]')).toHaveCount(0);
   await expect(page.getByText("Private draft from A")).toHaveCount(0);
   const serverView = await context.newPage();
   await serverView.goto(detailUrl(1));
@@ -2233,7 +2273,14 @@ test("AdminShell discards the prior administrator draft before a changed identit
   await memberRow().getByRole("button", { name: "Remove locally" }).click();
   await fixtureCookies(context, "collections", "editor");
   await page.getByRole("link", { name: "Back to Collections" }).click();
+  await expect(guard).toBeVisible();
+  await expect(page).toHaveURL(detailUrl(1));
+  await expect(basic().getByLabel("English name")).toHaveValue("Private draft from B");
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(/\/admin\/collections$/);
   await expect(page.getByLabel("Administrator ID ending 11111111")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Admin navigation" }).filter({ visible: true })
+    .getByRole("link", { name: "Imports" })).toBeVisible();
   await page.getByRole("region", { name: "Collection list" })
     .getByRole("link", { name: "Open full details for Collection 1", exact: true }).click();
   await basic().getByRole("button", { name: "Edit local draft" }).click();
@@ -2934,6 +2981,7 @@ test("cancelled sign-out keeps the draft and login without calling the action", 
   await page.getByRole("button", { name: "Sign out" }).click();
   const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
   await expect(guard).toBeVisible();
+  await expect(guard).toContainText("permanently discards every unsaved local draft");
   expect(submissions).toBe(0);
   await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
   await expect(guard).toBeHidden();

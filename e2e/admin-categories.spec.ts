@@ -134,12 +134,13 @@ test("category status impact, navigation warning and access remain isolated", as
   const mobileMenu = page.getByRole("button", { name: "Open admin menu" });
   const isMobile = await mobileMenu.isVisible();
   if (isMobile) await mobileMenu.click();
-  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.dismiss(); });
   const navigation = isMobile ? page.getByRole("dialog", { name: "Admin menu" }) :
     page.getByRole("complementary", { name: "Admin sidebar" });
   await navigation.getByRole("link", { name: "Products", exact: true }).click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
   await expect(editor.getByText("Unsaved local changes")).toBeVisible();
-  if (isMobile) await page.keyboard.press("Escape");
   expect(await page.evaluate(() => {
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);

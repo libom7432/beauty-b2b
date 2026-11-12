@@ -14,7 +14,7 @@ export function AdminGuardProbe() {
   }, []);
   if (!enabled) return null;
   const submit = (event: MouseEvent<HTMLButtonElement>, target: string,
-    scope: "GLOBAL" | "COLLECTION" = "GLOBAL") => {
+    scope: "GLOBAL" | "COLLECTION" | "CURRENT" = "GLOBAL") => {
     const result = requestNavigation({ target, type: "PUSH", scope,
       collectionId: location.pathname.split("/")[3], trigger: event.currentTarget });
     setResults((prior) => [...prior, result]);
@@ -23,6 +23,8 @@ export function AdminGuardProbe() {
     <button type="button" onClick={(event) => submit(event, "/admin")}>Probe Dashboard</button>
     <button type="button" onClick={(event) => submit(event, "/admin/products")}>Probe Products</button>
     <button type="button" onClick={(event) => submit(event, "/admin", "COLLECTION")}>Probe Collection scope</button>
+    <button type="button" onClick={(event) => submit(event,
+      "/admin/collections/00000002-0000-4000-8000-000000000000", "CURRENT")}>Probe Other Collection</button>
     <label>Probe approval ID<input value={approvalId}
       onChange={(event) => setApprovalId(event.target.value)} /></label>
     <button type="button" onClick={() => approveNavigation(Number(approvalId))}>Probe approve ID</button>

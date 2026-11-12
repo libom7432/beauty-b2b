@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { GuardedAdminLink } from "./admin-unsaved-changes";
 import { AdminBadge, AdminCard, AdminEmptyState, AdminTable } from "./ui";
 import type { RFQInboxDetail, RFQInboxPage } from "@/lib/rfq/inbox";
 
@@ -21,12 +21,12 @@ export function RFQInboxListPanel({ result, state, demo = false }: {
       <AdminTable caption="Merchant inquiries" headings={["RFQ", "Received", "Status", "Company", "MOQ", "Open"]}>
         {result.items.map((row) => <tr key={row.id}><td>{row.rfqNumber}</td><td>{row.createdAt.slice(0, 16).replace("T", " ")} UTC</td>
           <td>{row.status}</td><td>{row.companyName}</td><td>{moqLabel(row.hasBelowMoq)}</td>
-          <td><Link className="admin-inline-link" href={`/admin/rfq/${row.id}`}>View details</Link></td></tr>)}
+          <td><GuardedAdminLink className="admin-inline-link" href={`/admin/rfq/${row.id}`}>View details</GuardedAdminLink></td></tr>)}
       </AdminTable>
       <nav className="admin-product-pagination" aria-label="RFQ pages">
-        {result.page > 1 ? <Link href={`/admin/rfq?page=${result.page - 1}`}>Previous</Link> : <span aria-disabled="true">Previous</span>}
+        {result.page > 1 ? <GuardedAdminLink href={`/admin/rfq?page=${result.page - 1}`}>Previous</GuardedAdminLink> : <span aria-disabled="true">Previous</span>}
         <span>Page {result.page}</span>
-        {result.hasMore ? <Link href={`/admin/rfq?page=${result.page + 1}`}>Next</Link> : <span aria-disabled="true">Next</span>}
+        {result.hasMore ? <GuardedAdminLink href={`/admin/rfq?page=${result.page + 1}`}>Next</GuardedAdminLink> : <span aria-disabled="true">Next</span>}
       </nav></> : null}
   </section>;
 }

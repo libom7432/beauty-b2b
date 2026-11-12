@@ -23,14 +23,21 @@ const loadComponent = (path, extra = {}) => {
   new Function("module", "exports", "require", js)(compiledModule, compiledModule.exports, localRequire);
   return compiledModule.exports;
 };
-const ui = loadComponent("src/components/admin/ui.tsx");
+const guardLinks = { GuardedAdminLink: ({ href, children, className }) =>
+  createElement("a", { href, className }, children) };
+const ui = loadComponent("src/components/admin/ui.tsx", { "./admin-unsaved-changes": guardLinks });
 const { CollectionListPanel } = loadComponent("src/components/admin/collection-list-panel.tsx", {
   "./ui": ui, "@/lib/admin/collections-query": { adminCollectionsHref },
+  "./admin-unsaved-changes": guardLinks,
+  "./collection-list-filters": { CollectionListFilters: ({ query }) => createElement("form",
+    { action: "/admin/collections", className: "admin-collection-filters" },
+    createElement("select", { name: "status", defaultValue: query.status }),
+    createElement("button", { type: "submit" }, "Apply filter")) },
 });
 const { CollectionDetailPanel } = loadComponent("src/components/admin/collection-detail-panel.tsx", {
   "./ui": ui, "@/lib/admin/collection-detail-query": { collectionMemberHref },
   "@/lib/admin/collection-candidate-search": { candidateHref, candidateQueryParams },
-  "./admin-unsaved-changes": { GuardedAdminLink: ({ href, children }) => createElement("a", { href }, children) },
+  "./admin-unsaved-changes": guardLinks,
 });
 const { default: Loading } = loadComponent("src/app/admin/(workspace)/collections/loading.tsx", {
   "@/components/admin/ui": ui,

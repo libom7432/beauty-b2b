@@ -163,8 +163,11 @@ const loadComponent = (path, extra = {}) => {
   new Function("module", "exports", "require", js)(compiled, compiled.exports, localRequire);
   return compiled.exports;
 };
-const ui = loadComponent("src/components/admin/ui.tsx");
-const { RFQInboxListPanel, RFQInboxDetailPanel } = loadComponent("src/components/admin/rfq-inbox-panel.tsx", { "./ui": ui });
+const guardLinks = { GuardedAdminLink: ({ href, children, className }) =>
+  createElement("a", { href, className }, children) };
+const ui = loadComponent("src/components/admin/ui.tsx", { "./admin-unsaved-changes": guardLinks });
+const { RFQInboxListPanel, RFQInboxDetailPanel } = loadComponent("src/components/admin/rfq-inbox-panel.tsx", {
+  "./ui": ui, "./admin-unsaved-changes": guardLinks });
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 
 test("synthetic UI marks low and historical MOQ without showing list contact data", async () => {

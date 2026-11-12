@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { AdminCategoryOptions } from "@/lib/catalog-read/types";
 import type { AdminProductsUrlQuery } from "@/lib/admin/products-query";
+import { useAdminUnsavedChanges } from "./admin-unsaved-changes";
 
 type Fields = Pick<AdminProductsUrlQuery, "search" | "status" | "category" | "sort">;
 type ClearAttempt = { id: number; origin: string; committedKey: string; target: "/admin/products" };
@@ -33,7 +34,7 @@ export function ProductListFilters({ query, categories, categoryOptionsUnavailab
   query: AdminProductsUrlQuery; categories?: AdminCategoryOptions; categoryOptionsUnavailable?: boolean;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
+  const { requestNavigation, isNavigationBusy, resumeNavigation } = useAdminUnsavedChanges();
   const searchParams = useSearchParams();
   const locationKey = `${pathname}?${searchParams.toString()}`;
   const serverFields = fieldsOf(query);
@@ -110,15 +111,18 @@ export function ProductListFilters({ query, categories, categoryOptionsUnavailab
   }, [locationKey, pathname, searchParams, serverKey, serverFields, committedKey]);
 
   const beginClear = (event: { preventDefault(): void }) => {
+    event.preventDefault();
     // A resumed request can still commit. Do not attach a second Clear attempt to its target.
-    if (attemptRef.current || preserveLateClear.current) { event.preventDefault(); return; }
+    if (attemptRef.current || preserveLateClear.current || isNavigationBusy()) return;
     if (pathname === "/admin/products" && searchParams.toString() === "" &&
       serverKey === fieldKey(clean)) {
-      event.preventDefault();
       setEditable(clean);
       setRecoverable(false);
       return;
     }
+    const result = requestNavigation({ type: "PUSH", scope: "CURRENT", target: "/admin/products",
+      trigger: document.activeElement instanceof HTMLElement ? document.activeElement : null });
+    if (result !== "EXECUTED") return;
     attemptRef.current = { id: ++nextAttemptId.current, origin: locationKey,
       committedKey, target: "/admin/products" };
     preserveLateClear.current = false;
@@ -128,6 +132,7 @@ export function ProductListFilters({ query, categories, categoryOptionsUnavailab
 
   const resumeEditing = () => {
     if (!attemptRef.current) return;
+    if (isNavigationBusy() && !resumeNavigation("/admin/products")) return;
     attemptRef.current = null;
     preserveLateClear.current = true;
     setPending(false);
@@ -139,7 +144,9 @@ export function ProductListFilters({ query, categories, categoryOptionsUnavailab
     if (attemptRef.current) return;
     const params = new URLSearchParams({ q: editable.search, status: editable.status,
       category: editable.category, sort: editable.sort });
-    router.push(`/admin/products?${params.toString()}`);
+    requestNavigation({ type: "PUSH", scope: "CURRENT",
+      target: `/admin/products?${params.toString()}`,
+      trigger: (event.nativeEvent as SubmitEvent).submitter as HTMLElement | null });
   };
 
   return <form className="admin-product-filters" action="/admin/products" method="get" role="search"

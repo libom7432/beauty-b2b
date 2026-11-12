@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 const check = createCollectionMembershipCheckGET({
   async access() {
     const role = (await cookies()).get("admin-ui-fixture")?.value;
-    return !role ? "anonymous" : role === "editor" || role === "catalog-only"
+    return !role ? "anonymous" : role === "editor" || role === "catalog-only" ||
+      role === "rfq-reader" || role === "rfq-manager"
       ? "allowed" : "forbidden";
   },
   async repository() {

@@ -76,20 +76,23 @@ test("confirmed navigation keeps the real draft protected until departure comple
     await requestGate;
     await route.abort();
   });
-  let confirmations = 0;
+  let nativeConfirmations = 0;
   page.on("dialog", async (dialog) => {
-    if (dialog.type() === "confirm") { confirmations += 1; await dialog.accept(); }
-    else await dialog.dismiss();
+    if (dialog.type() === "confirm") nativeConfirmations++;
+    await dialog.dismiss();
   });
   const mobileMenu = page.getByRole("button", { name: "Open admin menu" });
   const isMobile = await mobileMenu.isVisible();
   if (isMobile) await mobileMenu.click();
   const navigation = isMobile ? page.getByRole("dialog", { name: "Admin menu" }) :
     page.getByRole("complementary", { name: "Admin sidebar" });
-  const click = navigation.getByRole("link", { name: "Categories", exact: true }).click();
+  await navigation.getByRole("link", { name: "Categories", exact: true }).click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
   try {
     await intercepted;
-    expect(confirmations).toBe(1);
+    expect(nativeConfirmations).toBe(0);
     await expect(editor.getByText("Unsaved local changes")).toBeVisible();
     expect(await page.evaluate(() => {
       const event = new Event("beforeunload", { cancelable: true });
@@ -98,7 +101,6 @@ test("confirmed navigation keeps the real draft protected until departure comple
     })).toBe(true);
   } finally {
     releaseRequest();
-    await click.catch(() => {});
   }
 });
 
@@ -113,8 +115,10 @@ test("completed navigation releases the guard without a second confirmation", as
     else throw new Error(`Unexpected ${dialog.type()} dialog`);
   });
   await page.getByRole("link", { name: "Back to Products" }).click();
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Continue navigation/ }).click();
   await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
-  expect(confirmations).toBe(1);
+  expect(confirmations).toBe(0);
   expect(await page.evaluate(() => {
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);
@@ -174,8 +178,9 @@ test("controlled links warn; refresh discards; anonymous and forbidden access ex
   await page.getByRole("button", { name: "Edit local draft" }).click();
   const editor = page.getByRole("region", { name: "Local product editor" });
   await editor.getByRole("group", { name: "English translation" }).getByLabel("Name").fill("Unsaved");
-  page.once("dialog", async (dialog) => { expect(dialog.type()).toBe("confirm"); await dialog.dismiss(); });
   await page.getByRole("link", { name: "Back to Products" }).click();
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Stay and keep editing/ }).click();
   await expect(editor.getByText("Unsaved local changes")).toBeVisible();
   const mobileMenu = page.getByRole("button", { name: "Open admin menu" });
   const isMobile = await mobileMenu.isVisible();

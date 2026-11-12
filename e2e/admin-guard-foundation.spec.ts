@@ -28,8 +28,9 @@ test("current Collection Dirty and Shell-wide Dirty are separate readings", asyn
   const basic = page.getByRole("region", { name: "Local collection basic editor" });
   await basic.getByRole("button", { name: "Edit local draft" }).click();
   await basic.getByLabel("English name").fill("Collection A draft");
-  page.once("dialog", async (dialog) => dialog.accept());
   await page.getByRole("link", { name: "Back to Collections" }).click();
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Continue navigation/ }).click();
   await page.locator('a[href="/admin/collections/00000002-0000-4000-8000-000000000000"]').first().click();
   await expect(page).toHaveURL(/00000002-0000-4000-8000-000000000000/);
   await expect(page.locator(".admin-shell")).toBeVisible();
@@ -41,6 +42,92 @@ test("current Collection Dirty and Shell-wide Dirty are separate readings", asyn
   await page.getByRole("button", { name: "Probe Collection scope" }).click();
   await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
   await expect(page.getByRole("dialog", { name: /Unsaved local changes/ })).toBeHidden();
+});
+
+test("current Collection A prompts for B but a retained A draft does not block clean B from Dashboard", async ({ page, context }, testInfo) => {
+  await openProbe(context, page);
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Retained Collection A draft");
+  await page.getByRole("button", { name: "Probe Other Collection" }).click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
+  await page.getByRole("button", { name: "Probe Dashboard" }).click();
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
+  if (testInfo.project.name === "mobile-chrome") {
+    await page.getByRole("button", { name: "Open admin menu" }).click();
+    await page.getByRole("dialog", { name: "Admin menu" })
+      .getByRole("link", { name: "Collections" }).click();
+  } else {
+    await page.getByRole("navigation", { name: "Admin navigation" }).first()
+      .getByRole("link", { name: "Collections" }).click();
+  }
+  await expect(guard).toBeHidden();
+  await page.locator('a[href="/admin/collections/00000002-0000-4000-8000-000000000000"]').first().click();
+  await expect(page).toHaveURL(/00000002-0000-4000-8000-000000000000/);
+  await expect(guard).toBeHidden();
+  await page.goBack();
+  await page.goBack();
+  await page.goBack();
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(basic.getByLabel("English name")).toHaveValue("Retained Collection A draft");
+});
+
+test("Collection list filter stays inside the Admin session with another Collection draft", async ({ page, context }) => {
+  await openProbe(context, page);
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Retained through list filter");
+  await page.getByRole("link", { name: "Back to Collections" }).click();
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/collections`);
+  await page.getByLabel("Collection status").selectOption("draft");
+  await page.getByRole("button", { name: "Apply filter" }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/collections?status=draft`);
+  await expect(page.getByRole("dialog", { name: /Unsaved local changes/ })).toBeHidden();
+  await page.goBack();
+  await page.goBack();
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(basic.getByLabel("English name")).toHaveValue("Retained through list filter");
+});
+
+test("candidate pagination cannot submit a second Router request during Guard navigation", async ({ page, context }) => {
+  await openProbe(context, page);
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("In-flight candidate gate");
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  const candidateRequests: string[] = [];
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    if (request.headers().rsc === "1") {
+      if (new URL(request.url()).searchParams.has("candidate_cursor")) candidateRequests.push(request.url());
+      if (new URL(request.url()).pathname === "/admin") await hold;
+    }
+    await route.continue();
+  });
+  try {
+    await page.getByRole("button", { name: "Probe Dashboard" }).click();
+    const started = page.waitForRequest((request) =>
+      new URL(request.url()).pathname === "/admin" && request.headers().rsc === "1");
+    await page.getByRole("dialog", { name: /Unsaved local changes/ })
+      .getByRole("button", { name: /Continue navigation/ }).click();
+    await started;
+    await expect(page.locator(".admin-guard-navigation-status")).toBeVisible();
+    const candidate = page.getByRole("region", { name: "Candidate product search" });
+    // The in-flight status covers pointer input on desktop. Dispatch the
+    // underlying button event to verify its handler also rejects a second push.
+    await candidate.getByRole("button", { name: "Next" }).evaluate((button: HTMLButtonElement) => button.click());
+    await expect(candidate.locator(".admin-candidate-filters")).toHaveAttribute("data-navigation-phase", "IDLE");
+    expect(candidateRequests).toEqual([]);
+  } finally {
+    release();
+  }
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
 });
 
 test("Basic and Membership share one confirmation; cancel restores focus and keeps drafts", async ({ page, context }) => {
@@ -75,6 +162,49 @@ test("Basic and Membership share one confirmation; cancel restores focus and kee
   await expect(member.getByText("Unsaved membership changes")).toBeVisible();
   await basic.getByRole("button", { name: "Edit local draft" }).click();
   await expect(basic.getByLabel("English name")).toHaveValue("Guarded Basic");
+});
+
+test("rfq.read entry uses the guard and preserves the Collection draft", async ({ page, context }, testInfo) => {
+  await fixtureCookies(context, "collections", "rfq-reader");
+  await page.goto(detailUrl());
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Keep for RFQ return");
+  if (testInfo.project.name === "mobile-chrome") {
+    await page.getByRole("button", { name: "Open admin menu" }).click();
+    await page.getByRole("dialog", { name: "Admin menu" })
+      .getByRole("link", { name: /RFQ/ }).click();
+    await expect(page.getByRole("dialog", { name: "Admin menu" })).toBeHidden();
+  } else {
+    await page.getByRole("navigation", { name: "Admin navigation" }).first()
+      .getByRole("link", { name: /RFQ/ }).click();
+  }
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  await expect(guard).toBeVisible();
+  await guard.getByRole("button", { name: /Stay and keep editing/ }).click();
+  await expect(basic.getByLabel("English name")).toHaveValue("Keep for RFQ return");
+  if (testInfo.project.name === "mobile-chrome") {
+    await page.getByRole("button", { name: "Open admin menu" }).click();
+    await page.getByRole("dialog", { name: "Admin menu" })
+      .getByRole("link", { name: /RFQ/ }).click();
+  } else {
+    await page.getByRole("navigation", { name: "Admin navigation" }).first()
+      .getByRole("link", { name: /RFQ/ }).click();
+  }
+  await guard.getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/rfq`);
+  await page.goBack();
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await expect(basic.getByLabel("English name")).toHaveValue("Keep for RFQ return");
+});
+
+test("rfq.manage alone cannot see or open the RFQ inbox", async ({ page, context }) => {
+  await fixtureCookies(context, "collections", "rfq-manager");
+  await page.goto(`${fixtureOrigin}/admin`);
+  await expect(page.locator('a[href="/admin/rfq"]')).toHaveCount(0);
+  await page.goto(`${fixtureOrigin}/admin/rfq`);
+  await expect(page).toHaveURL(/\/admin\?rfq=forbidden/);
+  await expect(page.locator(".admin-rfq-detail")).toHaveCount(0);
 });
 
 test("one intent owns the dialog and a second target cannot replace it", async ({ page, context }) => {

@@ -27,11 +27,14 @@ const loadComponent = (path, extra = {}) => {
   new Function("module", "exports", "require", js)(compiledModule, compiledModule.exports, localRequire);
   return compiledModule.exports;
 };
-const ui = loadComponent("src/components/admin/ui.tsx");
+const guardLinks = { GuardedAdminLink: ({ href, children, className }) =>
+  createElement("a", { href, className }, children) };
+const ui = loadComponent("src/components/admin/ui.tsx", { "./admin-unsaved-changes": guardLinks });
 const { ProductListPanel } = loadComponent("src/components/admin/product-list-panel.tsx", {
   "./ui": ui, "@/lib/admin/products-query": { adminProductsHref },
   "@/lib/admin/product-detail-navigation": { adminProductIdDetailHref },
   "./product-list-filters": { ProductListFilters: () => createElement("div") },
+  "./admin-unsaved-changes": guardLinks,
 });
 const render = (props) => renderToStaticMarkup(createElement(ProductListPanel, props));
 

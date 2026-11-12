@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import Link from "next/link";
+import { GuardedAdminLink } from "./admin-unsaved-changes";
 
 export function AdminBadge({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "warning" | "positive" }) {
   return <span className={`admin-badge admin-badge-${tone}`}>{children}</span>;
@@ -9,7 +9,7 @@ export function AdminCard({ title, description, href, children, className = "" }
   title: string; description?: string; href?: string; children?: ReactNode; className?: string;
 }) {
   return <section className={`admin-card ${className}`}>
-    <div className="admin-card-heading"><h2>{title}</h2>{href && <Link href={href} className="admin-card-link">Open <span aria-hidden="true">↗</span></Link>}</div>
+    <div className="admin-card-heading"><h2>{title}</h2>{href && <GuardedAdminLink href={href} className="admin-card-link">Open <span aria-hidden="true">↗</span></GuardedAdminLink>}</div>
     {description && <p>{description}</p>}{children}
   </section>;
 }

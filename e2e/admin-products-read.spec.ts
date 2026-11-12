@@ -1,4 +1,4 @@
-import { expect, test, type Request } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { fixtureCookies, fixtureOrigin, startAdminFixture, stopAdminFixture } from "./support/admin-site";
 
 test.beforeAll(async () => { await startAdminFixture(); });
@@ -168,31 +168,22 @@ test("Clear in flight blocks stale Sort and supports explicit recovery", async (
   await expect(page.getByLabel("Sort by")).toHaveValue("updated_desc");
 });
 
-test("a committed Next page supersedes a held Clear without leaving filters locked", async ({ page, context }) => {
+test("a held Clear owns the Guard until it commits; Next works afterward", async ({ page, context }) => {
   await fixtureCookies(context, "query");
   await page.goto(`${fixtureOrigin}/admin/products?sort=product_code_desc`);
   await expect(page.getByRole("link", { name: "Next" })).toBeVisible();
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
-  let releaseNext!: () => void;
-  const nextHeld = new Promise<void>((resolve) => { releaseNext = resolve; });
   let observe!: () => void;
   const observed = new Promise<void>((resolve) => { observe = resolve; });
-  let observeNext!: () => void;
-  const nextObserved = new Promise<void>((resolve) => { observeNext = resolve; });
-  let oldClearRequest: Request | null = null;
   const requests: string[] = [];
   await page.route("**/admin/products*", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/admin/products" && url.searchParams.has("_rsc")) {
       requests.push(url.search);
       if (!url.searchParams.has("sort") && !url.searchParams.has("page")) {
-        oldClearRequest = route.request();
         observe();
         await held;
-      } else if (url.searchParams.get("page") === "2") {
-        observeNext();
-        await nextHeld;
       }
     }
     await route.continue();
@@ -201,38 +192,106 @@ test("a committed Next page supersedes a held Clear without leaving filters lock
     await page.getByRole("link", { name: "Clear Filters" }).click();
     await observed;
     await expect(page.getByRole("button", { name: "Apply Filters" })).toBeDisabled();
-    await page.getByRole("link", { name: "Next" }).click();
-    await nextObserved;
-    await expect(page.getByRole("button", { name: "Apply Filters" })).toBeDisabled();
-    releaseNext();
-    await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/sort=product_code_desc.*page=2/);
-    await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-31");
-    await expect(page.getByRole("button", { name: "Apply Filters" })).toBeEnabled();
-    await expect(page.getByLabel("Sort by")).toHaveValue("product_code_desc");
-    await expect(page.getByText("Clearing filters.", { exact: false })).toHaveCount(0);
-    expect(requests).toHaveLength(2);
-
-    const oldSettled = new Promise<void>((resolve) => {
-      const finished = (request: Request) => {
-        if (request !== oldClearRequest) return;
-        page.off("requestfinished", finished);
-        page.off("requestfailed", finished);
-        resolve();
-      };
-      page.on("requestfinished", finished);
-      page.on("requestfailed", finished);
-    });
+    await expect(page.locator(".admin-guard-dialog")).toHaveAttribute("data-navigation-lifecycle", "NAVIGATING");
+    await page.getByRole("link", { name: "Next" }).evaluate((link: HTMLAnchorElement) => link.click());
+    await expect(page).toHaveURL(`${fixtureOrigin}/admin/products?sort=product_code_desc`);
+    expect(requests).toHaveLength(1);
     release();
-    await oldSettled;
-    await expect(page).toHaveURL(/sort=product_code_desc.*page=2/);
-    await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-31");
+    await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
     await expect(page.getByRole("button", { name: "Apply Filters" })).toBeEnabled();
-    await page.getByLabel("Sort by").selectOption("product_code_asc");
-    await page.getByRole("button", { name: "Apply Filters" }).click();
-    await expect(page).toHaveURL(/sort=product_code_asc/);
-    await expect(page.locator(".admin-table tbody tr").first()).toContainText("FAMILY-1");
-  } finally { releaseNext(); release(); }
+    await page.getByRole("link", { name: "Next" }).click();
+    await expect(page).toHaveURL(/page=2/);
+    await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+    expect(requests.filter((search) => new URLSearchParams(search).get("page") === "2")).toHaveLength(1);
+  } finally { release(); }
+});
+
+test("Products pagination, Apply and Clear cannot replace a confirming or navigating Guard intent", async ({ page, context }, testInfo) => {
+  await fixtureCookies(context, "collections");
+  await context.addCookies([{ name: "admin-guard-probe", value: "1", url: fixtureOrigin }]);
+  await page.goto(`${fixtureOrigin}/admin/collections/00000001-0000-4000-8000-000000000000`);
+  const basic = page.getByRole("region", { name: "Local collection basic editor" });
+  await basic.getByRole("button", { name: "Edit local draft" }).click();
+  await basic.getByLabel("English name").fill("Retained while browsing Products");
+  await page.getByRole("button", { name: "Probe Products" }).click();
+  await page.getByRole("dialog", { name: /Unsaved local changes/ })
+    .getByRole("button", { name: /Continue navigation/ }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  await page.getByLabel("Sort by").selectOption("product_code_desc");
+  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await expect(page).toHaveURL(/sort=product_code_desc/);
+  await expect(page.getByRole("link", { name: "Next" })).toBeVisible();
+
+  const productsRequests: string[] = [];
+  let dashboardRequests = 0;
+  page.on("request", (request) => {
+    if (request.headers().rsc !== "1") return;
+    const url = new URL(request.url());
+    if (url.pathname === "/admin/products") productsRequests.push(url.search);
+    if (url.pathname === "/admin") dashboardRequests++;
+  });
+  const tryProductsRoutes = () => page.evaluate(() => {
+    document.querySelector<HTMLAnchorElement>('nav[aria-label="Product pages"] a')?.click();
+    document.querySelector<HTMLFormElement>(".admin-product-filters")?.dispatchEvent(
+      new Event("submit", { bubbles: true, cancelable: true }));
+    document.querySelector<HTMLAnchorElement>(".admin-product-filter-actions a")?.click();
+  });
+  await page.getByRole("button", { name: "Probe Dashboard" }).click();
+  const guard = page.getByRole("dialog", { name: /Unsaved local changes/ });
+  const guardDialog = page.locator(".admin-guard-dialog");
+  await expect(guard).toBeVisible();
+  const intentId = await guardDialog.getAttribute("data-navigation-intent-id");
+  await tryProductsRoutes();
+  await expect(guardDialog).toHaveAttribute("data-navigation-intent-id", intentId ?? "");
+  await expect(page).toHaveURL(/sort=product_code_desc/);
+  expect(productsRequests).toEqual([]);
+
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let observe!: () => void;
+  const observed = new Promise<void>((resolve) => { observe = resolve; });
+  await page.route("**/admin*", async (route) => {
+    const request = route.request();
+    if (new URL(request.url()).pathname === "/admin" && request.headers().rsc === "1") {
+      observe();
+      await held;
+    }
+    await route.continue();
+  });
+  try {
+    await guard.getByRole("button", { name: /Continue navigation/ }).click();
+    await observed;
+    await expect(guardDialog).toHaveAttribute("data-navigation-lifecycle", "NAVIGATING");
+    await tryProductsRoutes();
+    await expect(guardDialog).toHaveAttribute("data-navigation-intent-id", intentId ?? "");
+    expect(productsRequests).toEqual([]);
+    expect(dashboardRequests).toBe(1);
+  } finally { release(); }
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin`);
+  await expect(page.getByLabel(/Administrator ID ending/)).toBeVisible();
+  if (testInfo.project.name === "mobile-chrome") {
+    const mobileMenu = page.getByRole("button", { name: "Open admin menu" });
+    const menu = page.getByRole("dialog", { name: "Admin menu" });
+    await expect(mobileMenu).toBeVisible();
+    await expect(mobileMenu).toBeEnabled();
+    if (!(await menu.isVisible())) await mobileMenu.click();
+    await expect(menu).toBeVisible();
+    const products = menu.getByRole("link", { name: "Products" });
+    await expect(products).toBeVisible();
+    await products.click();
+  } else {
+    const products = page.getByRole("navigation", { name: "Admin navigation" }).filter({ visible: true })
+      .getByRole("link", { name: "Products" });
+    await expect(products).toBeVisible();
+    await products.click();
+  }
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
+  await page.getByRole("searchbox", { name: "Search products" }).fill("family-112");
+  await page.getByRole("button", { name: "Apply Filters" }).click();
+  await expect(page).toHaveURL(/q=family-112/);
+  await expect(page.getByRole("link", { name: "FAMILY-112" })).toBeVisible();
+  await page.getByRole("link", { name: "Clear Filters" }).click();
+  await expect(page).toHaveURL(`${fixtureOrigin}/admin/products`);
 });
 
 test("hung Clear can resume without claiming the request was cancelled", async ({ page, context }) => {
@@ -261,7 +320,8 @@ test("hung Clear can resume without claiming the request was cancelled", async (
     await observed;
     await page.getByRole("button", { name: "Resume editing filters" }).click();
     await expect(page.getByRole("searchbox", { name: "Search products" })).toBeEnabled();
-    await expect(page.getByRole("status")).toContainText("earlier Clear Filters request may still finish");
+    await expect(page.locator(".admin-product-filters [role=status]"))
+      .toContainText("earlier Clear Filters request may still finish");
     await page.getByRole("searchbox", { name: "Search products" }).fill("family-12");
     await page.evaluate(() => document.querySelector<HTMLAnchorElement>(
       '.admin-product-filter-actions a')?.click());

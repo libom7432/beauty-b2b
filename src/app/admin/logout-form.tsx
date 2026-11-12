@@ -1,10 +1,10 @@
 "use client";
-import { startTransition, useActionState, useCallback, useEffect, useRef, type FormEvent } from "react";
+import { startTransition, useActionState, useCallback, useEffect, useLayoutEffect, useRef, type FormEvent } from "react";
 import { logoutAction } from "./actions";
 import { useAdminUnsavedChanges } from "@/components/admin/admin-unsaved-changes";
 
-export function LogoutForm({ onStart, onFailure }: {
-  onStart?: () => void; onFailure?: () => void;
+export function LogoutForm({ onStart, onFailure, onSuccess }: {
+  onStart?: () => void; onFailure?: () => void; onSuccess?: () => void;
 }) {
   // The server returns the same "failed" value on every failure. Give each
   // completed attempt a distinct action state so every retry can unlock.
@@ -15,6 +15,13 @@ export function LogoutForm({ onStart, onFailure }: {
   const [failedAttempts, action, pending] = useActionState(logoutAttempt, 0);
   const { requestNavigation } = useAdminUnsavedChanges();
   const submitted = useRef(false);
+  const success = useRef(onSuccess);
+  useLayoutEffect(() => { success.current = onSuccess; }, [onSuccess]);
+  useEffect(() => () => {
+    // The successful server action redirects and unmounts this form. A failed
+    // action clears submitted below, so its retained draft can be recovered.
+    if (submitted.current) success.current?.();
+  }, []);
   useEffect(() => {
     if (failedAttempts === 0 || !submitted.current) return;
     submitted.current = false;
